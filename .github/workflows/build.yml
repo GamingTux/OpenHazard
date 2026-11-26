@@ -203,6 +203,8 @@ jobs:
       - name: Create Release with all 6 portable archives
         uses: softprops/action-gh-release@v2
         with:
+          name: OpenHazard ${{ github.ref_name }}
+          generate_release_notes: true
           files: |
             dist/OpenHazard-*.tar.gz
             dist/OpenHazard-*.zip
