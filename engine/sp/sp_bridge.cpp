@@ -69,7 +69,10 @@ extern "C" {
     void  Cvar_Set( const char *name, const char *value );
     int   Cvar_Flags( const char *name );   // engine flags, or CVAR_NONEXISTENT if unregistered
     int   Cvar_VariableIntegerValue( const char *name );
+    float Cvar_VariableValue( const char *name );
     void  Cvar_VariableStringBuffer( const char *name, char *buf, int bufsize );
+    void  S_StopAllSounds( void );
+    void  S_ClearLoopingSounds( qboolean killall );
     char *Cvar_InfoString_Big( int bit );   // all CVAR_ARCHIVE cvars as "\key\val\..." for the CVCN save bag
     int   FS_FOpenFileByMode( const char *qpath, fileHandle_t *f, fsMode_t mode );
     int   FS_Read( void *buffer, int len, fileHandle_t f );
@@ -458,7 +461,11 @@ static qboolean W_AreasConnected( int a, int b ){ return CM_AreasConnected(a,b);
 static int   I_FS_ReadFile( const char *name, void **buf ){ return (int)FS_ReadFile(name,buf); }
 static void *I_Malloc( int bytes ){ return malloc((size_t)bytes); }
 static void  I_Free( void *p ){ free(p); }
+static int   g_binkQueued = 0;
 static void  I_SendConsole( const char *t ){
+    if ( t && strncmp( t, "inGameCinematic", 15 ) == 0 ) {
+        g_binkQueued = 1;
+    }
     Cbuf_AddText(t);
 }
 static void  I_DropClient( int n, const char *r ){ (void)n;(void)r; }
@@ -700,6 +707,9 @@ extern "C" qboolean SP_SpawnServer( const char *mapname ){
     W_ResetLinked(); g_levelTime = 1000;
     memset(g_entPortalOpen, 0, sizeof(g_entPortalOpen));  // New Game: CM (re)loaded -> all areaportals start sealed
     Cvar_Set( "cl_paused", "0" );   // EF1 SP 1:1: retail SV_SpawnServer unpauses every spawn (sv_init.c:464)
+    Cvar_Set( "skippingCinematic", "0" );
+    Cvar_Set( "timescale", "1" );
+    g_binkQueued = 0;
     memset(g_voiceEnd, 0, sizeof(g_voiceEnd)); memset(g_sOverride, 0, sizeof(g_sOverride)); // fresh map: no stale voices
     // BRIDGE-side statics dlclose does NOT touch (these live in libmain, not libefgame) — reset per map:
     memset(g_entClip, 0, sizeof(g_entClip)); g_svCmdSeq = 0; g_snapNum = 1; g_cmdNum = 1;
@@ -1298,6 +1308,9 @@ extern "C" qboolean SP_FinishTransition(void){
     g_spActive = 0;
     memset(g_entClip, 0, sizeof(g_entClip)); g_svCmdSeq = 0; g_snapNum = 1; g_cmdNum = 1;   // bridge statics
     memset(g_snapHist, 0, sizeof(g_snapHist)); g_snapBaseTime = 0; g_simResidual = 0;        // ring + cadence
+    Cvar_Set( "skippingCinematic", "0" );
+    Cvar_Set( "timescale", "1" );
+    g_binkQueued = 0;
 
     // EF1 SP 1:1: retail clears the permanent hunk + collision map on EVERY spawn in SV_SpawnServer
     // (sv_init.c:419-422 — Hunk_Clear() then CM_ClearMap(), before CM_LoadMap). The SP bridge runs the
@@ -1828,6 +1841,18 @@ extern "C" void SP_AbortState(void){
 // The currently-active SP map name (empty if none). Used by SP_MapWrap_f to debounce a spurious
 // repeat of 'map <same-map>' that would otherwise reload and hit the renderer's redundant-world guard.
 extern "C" const char* SP_CurMap(void){ return g_curMap; }
+extern "C" int SP_SkipCutscene(void){
+    if( !g_spActive || !ge ) return 0;
+    if( SP_GameAllowedToSaveHere() ) return 0; // true = normal play, false = in_camera cutscene
+    if( !Cvar_VariableIntegerValue( "skippingCinematic" ) ) {
+        Cvar_Set( "skippingCinematic", "1" );
+        Cvar_Set( "timescale", "100" );
+        S_StopAllSounds();
+        S_ClearLoopingSounds( qtrue );
+        blog( "EFSP: skipping scripted cutscene (timescale=100)\n" );
+    }
+    return 1;
+}
 // Advance the sim by REAL elapsed wall-clock time each rendered frame. This keeps the original's
 // smooth per-frame structure (RunFrame every frame -> smooth view) while running at CORRECT speed
 // (the prior code added a fixed 50ms/frame -> 3x at 60fps; a 20Hz accumulator was correct-speed but
@@ -1904,19 +1929,72 @@ extern "C" void SP_DrawFrame(int serverTime, int stereo){
       g_lastcmd.weapon = (byte)g_weaponSelect; }
 
     // FIXED 50ms/20Hz SIM CADENCE — mirror retail SV_Frame:
-    // accumulate real elapsed ms, then drain it in fixed SP_SV_FRAMEMSEC quanta, advancing g_levelTime by
-    // exactly 50 each tick and emitting ONE snapshot per tick on the 50ms grid.
-    g_simResidual += delta;
-    if( g_simResidual > SP_SV_FRAMEMSEC * SP_MAX_CATCHUP )   // hitch cap: bound catch-up, no spiral
-        g_simResidual = SP_SV_FRAMEMSEC * SP_MAX_CATCHUP;
-    while( g_simResidual >= SP_SV_FRAMEMSEC ) {
-        g_simResidual -= SP_SV_FRAMEMSEC;
-        g_levelTime   += SP_SV_FRAMEMSEC;
-        g_cmdNum++;
-        g_lastcmd.serverTime = g_levelTime;
-        ge->ClientThink(0, &g_lastcmd);
-        SP_UpdateVoiceOverride(); ge->RunFrame(g_levelTime);
-        BuildSnapshot();
+    // Honor timescale & skippingCinematic so scripted in-engine cutscenes (in_camera)
+    // fast-forward cleanly instead of running at 1x real time.
+    {
+        static int s_wasSkipping = 0;
+        const int skipping = Cvar_VariableIntegerValue( "skippingCinematic" ) != 0;
+        if ( skipping && !s_wasSkipping ) {
+            S_StopAllSounds();
+            S_ClearLoopingSounds( qtrue );
+            memset( g_voiceEnd, 0, sizeof( g_voiceEnd ) );
+            memset( g_sOverride, 0, sizeof( g_sOverride ) );
+        }
+        s_wasSkipping = skipping;
+
+        if ( skipping ) {
+            int maxTicks = 200; // up to 10s of cutscene per frame (~0.1s for a 60s intro)
+            g_simResidual = 0;
+            while ( maxTicks-- > 0 ) {
+                g_levelTime += SP_SV_FRAMEMSEC;
+                g_cmdNum++;
+                g_lastcmd.serverTime = g_levelTime;
+                ge->ClientThink( 0, &g_lastcmd );
+                // Clear skip buttons after tick 0 so a held key cannot toggle skip back off.
+                g_lastcmd.buttons = 0;
+                g_lastcmd.upmove = 0;
+                SP_UpdateVoiceOverride();
+                ge->RunFrame( g_levelTime );
+                BuildSnapshot();
+
+                if ( !Cvar_VariableIntegerValue( "skippingCinematic" ) || SP_GameAllowedToSaveHere() ) {
+                    blog( "EFSP: scripted cutscene skip finished (levelTime=%d)\n", g_levelTime );
+                    Cvar_Set( "skippingCinematic", "0" );
+                    Cvar_Set( "timescale", "1" );
+                    break;
+                }
+                if ( g_binkQueued || g_transMap[0] || !g_spActive ) {
+                    blog( "EFSP: scripted cutscene skip paused for %s (levelTime=%d)\n",
+                          g_binkQueued ? "inGameCinematic" : "map transition", g_levelTime );
+                    g_binkQueued = 0;
+                    Cvar_Set( "skippingCinematic", "0" );
+                    Cvar_Set( "timescale", "1" );
+                    break;
+                }
+            }
+        } else {
+            float ts = Cvar_VariableValue( "timescale" );
+            int scaledDelta = delta;
+            if ( ts > 0.0f && fabsf( ts - 1.0f ) > 1e-3f ) {
+                if ( ts < 0.05f ) ts = 0.05f;
+                if ( ts > 10.0f ) ts = 10.0f;
+                scaledDelta = (int)( delta * ts + 0.5f );
+                if ( scaledDelta < 1 ) scaledDelta = 1;
+            }
+            g_simResidual += scaledDelta;
+            const int maxResidual = SP_SV_FRAMEMSEC * ( ( ts > 1.0f ) ? (int)( SP_MAX_CATCHUP * ts ) : SP_MAX_CATCHUP );
+            if ( g_simResidual > maxResidual )   // hitch cap: bound catch-up, no spiral
+                g_simResidual = maxResidual;
+            while ( g_simResidual >= SP_SV_FRAMEMSEC ) {
+                g_simResidual -= SP_SV_FRAMEMSEC;
+                g_levelTime   += SP_SV_FRAMEMSEC;
+                g_cmdNum++;
+                g_lastcmd.serverTime = g_levelTime;
+                ge->ClientThink( 0, &g_lastcmd );
+                SP_UpdateVoiceOverride(); ge->RunFrame( g_levelTime );
+                BuildSnapshot();
+            }
+        }
     }
 
     // Deferred autosave: an autosave requested during a cutscene (in_camera) was held back by SP_SaveGame so it

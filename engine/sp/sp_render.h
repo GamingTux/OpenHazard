@@ -44,6 +44,7 @@ int   SPR_S_GetSampleLength(int sfx);   // sound playing time ms (subtitle timin
 
 // SP-side (defined in sp_bridge.cpp) — driven by the HM render hook each frame.
 int      SP_IsActive(void);          // 1 once spmap has loaded a map
+int      SP_SkipCutscene(void);      // 1 if a scripted in-engine cutscene (in_camera) is active (triggers fast-forward)
 void     SP_DrawFrame(int serverTime, int stereo);  // run sim + SP cgame draw (calls SPR_*)
 
 #ifdef __cplusplus

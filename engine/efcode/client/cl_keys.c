@@ -21,6 +21,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 #include "client.h"
 #include "../../sp/sp_ui.h"   // EF1 SP native UI (libefui.so) drive hooks
+extern int SP_SkipCutscene( void );
 
 /*
 
@@ -1269,20 +1270,36 @@ void CL_KeyDownEvent( int key, unsigned time )
 
 	// EF1 SP 1:1 (matches the retail engine key handler): a key/tap with no
 	// key-catcher during an IN-GAME cinematic overlay (clc.state stays CA_ACTIVE) skips it via
-	// the 1.2s-guarded SCR_StopCinematic, which clears cl_paused and resumes the mission. This
+	// the guarded SCR_StopCinematic, which clears cl_paused and resumes the mission. This
 	// replaces the broken old behavior where mission FMVs (routed through CA_CINEMATIC) sent a
 	// tap to CL_Disconnect_f -> main menu. The key is consumed either way (returns here).
-	if ( ( key < 128 || key == K_MOUSE1 ) && Key_GetCatcher( ) == 0 && CL_SkipInGameCinematic() ) {
-		return;
-	}
+	{
+		const qboolean isCinSkipKey =
+			( key < 128 || key == K_MOUSE1 || key == K_MOUSE2 || key == K_KP_ENTER ||
+			  key == K_PAD0_A || key == K_PAD0_B || key == K_PAD0_START );
 
-	// keys can still be used for bound actions
-	if ( ( key < 128 || key == K_MOUSE1 ) &&
-		( clc.demoplaying || clc.state == CA_CINEMATIC ) && Key_GetCatcher( ) == 0 ) {
+		if ( isCinSkipKey && Key_GetCatcher( ) == 0 && CL_SkipInGameCinematic() ) {
+			return;
+		}
 
-		if (Cvar_VariableValue ("com_cameraMode") == 0) {
-			Cvar_Set ("nextdemo","");
-			key = K_ESCAPE;
+		// Scripted in-engine SP cutscenes (in_camera): allow skipping via Space, Enter,
+		// Escape, or Gamepad A/B/Start on initial press (SP_DrawFrame fast-forwards timescale).
+		if ( clc.state == CA_ACTIVE && !clc.demoplaying && Key_GetCatcher( ) == 0 &&
+			 keys[key].repeats == 1 &&
+			 ( key == K_ESCAPE || key == K_SPACE || key == K_ENTER || key == K_KP_ENTER ||
+			   key == K_PAD0_A || key == K_PAD0_B || key == K_PAD0_START ) &&
+			 SP_SkipCutscene() ) {
+			return;
+		}
+
+		// keys can still be used for bound actions
+		if ( isCinSkipKey &&
+			( clc.demoplaying || clc.state == CA_CINEMATIC ) && Key_GetCatcher( ) == 0 ) {
+
+			if (Cvar_VariableValue ("com_cameraMode") == 0) {
+				Cvar_Set ("nextdemo","");
+				key = K_ESCAPE;
+			}
 		}
 	}
 

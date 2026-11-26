@@ -1564,7 +1564,7 @@ int CIN_PlayCinematic( const char *arg, int x, int y, int w, int h, int systemBi
 	cinTable[currentHandle].shader = (systemBits & CIN_shader) != 0;
 
 	if (cinTable[currentHandle].alterGameState) {
-		// close the menu
+		// close the menu and ensure skip keys reach the cinematic handler
 		if ( SPUI_IsActive() ) {
 			SPUI_SetActiveMenu( NULL );
 		} else if ( uivm ) {
@@ -1573,6 +1573,9 @@ int CIN_PlayCinematic( const char *arg, int x, int y, int w, int h, int systemBi
 			cls.syncUICursor = qtrue;
 #endif
 		}
+		if ( !( Key_GetCatcher() & KEYCATCH_CONSOLE ) ) {
+			Key_SetCatcher( 0 );
+		}
 	} else if (cinTable[currentHandle].inGameCinematic) {
 		// EF1 SP 1:1: the retail engine pauses the sim for the in-game overlay
 		// (Cvar_Set("cl_paused","1")). The SP bridge freezes the sim while cl_paused is set
@@ -1580,6 +1583,9 @@ int CIN_PlayCinematic( const char *arg, int x, int y, int w, int h, int systemBi
 		// CA_ACTIVE case). playonwalls stays 1 so this draws full-screen via SCR_DrawCinematic
 		// (it is NOT a cgame TV-wall video). Unpaused on EOF/skip by CIN_StopCinematic.
 		Cvar_Set( "cl_paused", "1" );
+		if ( !( Key_GetCatcher() & KEYCATCH_CONSOLE ) ) {
+			Key_SetCatcher( 0 );
+		}
 	} else {
 		cinTable[currentHandle].playonwalls = cl_inGameVideo->integer;
 	}
@@ -1857,6 +1863,11 @@ void CL_PlayInGameCinematic_f(void) {
 		return;
 	}
 
+	// Match retail Bink startup: a scripted cutscene skip must stop at the Bink movie
+	// (Q3_Interface.cpp SET_VIDEO_PLAY) so the player can watch or skip it separately.
+	Cvar_Set( "timescale", "1" );
+	Cvar_Set( "skippingCinematic", "0" );
+
 	// a story FMV always plays fresh; close any cinematic still up first
 	if ( CL_handle >= 0 ) {
 		SCR_StopCinematic();
@@ -1944,7 +1955,7 @@ qboolean CL_SkipInGameCinematic( void ) {
 	if ( !CL_InGameCinematicActive() ) {
 		return qfalse;
 	}
-	if ( CL_ScaledMilliseconds() - cinTable[CL_handle].startTime >= 1200 ) {
+	if ( CL_ScaledMilliseconds() - cinTable[CL_handle].startTime >= 300 ) {
 		SCR_StopCinematic();
 	}
 	return qtrue;
