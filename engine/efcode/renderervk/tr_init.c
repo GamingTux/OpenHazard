@@ -1875,8 +1875,8 @@ static void R_Register( void )
 	//
 	r_allowExtensions = ri.Cvar_Get( "r_allowExtensions", "1", CVAR_ARCHIVE_ND | CVAR_LATCH | CVAR_DEVELOPER );
 	ri.Cvar_SetDescription( r_allowExtensions, "Use all of the OpenGL extensions your card is capable of." );
-	r_ext_compressed_textures = ri.Cvar_Get( "r_ext_compressed_textures", "0", CVAR_ARCHIVE_ND | CVAR_LATCH | CVAR_DEVELOPER );
-	ri.Cvar_SetDescription( r_ext_compressed_textures, "Enables texture compression." );
+	r_ext_compressed_textures = ri.Cvar_Get( "r_ext_compressed_textures", "1", CVAR_ARCHIVE_ND | CVAR_LATCH );
+	ri.Cvar_SetDescription( r_ext_compressed_textures, "Enables hardware-compressed texture packs (KTX1 ASTC on ARM/Pi/Apple Silicon)." );
 	// EF retail configs spell this 'r_ext_compress_textures' (HM 2cdcf5e); register the alias so an
 	// imported config's value is honored instead of silently ignored.
 	{

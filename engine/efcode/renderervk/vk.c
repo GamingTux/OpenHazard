@@ -2078,6 +2078,16 @@ static qboolean vk_create_device( VkPhysicalDevice physical_device, int device_i
 			vk.samplerAnisotropy = qtrue;
 		}
 
+		if ( device_features.textureCompressionASTC_LDR ) {
+			features.textureCompressionASTC_LDR = VK_TRUE;
+			vk.astcLdr = qtrue;
+		}
+
+		if ( device_features.textureCompressionBC ) {
+			features.textureCompressionBC = VK_TRUE;
+			vk.bcCompression = qtrue;
+		}
+
 		device_desc.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
 		device_desc.pNext = NULL;
 		device_desc.flags = 0;
@@ -4638,6 +4648,13 @@ void vk_initialize( void )
 	}
 #endif
 
+	if ( vk.astcLdr || vk.bcCompression ) {
+		ri.Printf( PRINT_ALL, "...hardware texture compression:%s%s%s\n",
+			vk.astcLdr ? " ASTC_LDR" : "",
+			vk.bcCompression ? " BC" : "",
+			( vk.astcLdr && r_ext_compressed_textures->integer ) ? " (KTX1 ASTC active)" : "" );
+	}
+
 	if ( r_gpuAutoTune->integer ) {
 		if ( props.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU ) {
 			vk.msaaActive = qfalse;
@@ -5773,6 +5790,115 @@ void vk_upload_image_data( image_t *image, int x, int y, int width, int height, 
 	if ( buf != pixels ) {
 		ri.Hunk_FreeTempMemory( buf );
 	}
+}
+
+
+qboolean vk_astc_format_supported( VkFormat format ) {
+	VkFormatProperties props;
+	if ( !vk.astcLdr ) {
+		return qfalse;
+	}
+	qvkGetPhysicalDeviceFormatProperties( vk.physical_device, format, &props );
+	return ( ( props.optimalTilingFeatures &
+	           ( VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT ) ) ==
+	         ( VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT ) )
+	       ? qtrue : qfalse;
+}
+
+
+void vk_upload_compressed_image( image_t *image, int width, int height, int mip_levels,
+                                 const byte *data, const uint32_t *mip_offsets, const uint32_t *mip_sizes,
+                                 int total_size ) {
+	VkCommandBuffer command_buffer;
+	VkBufferImageCopy regions[16];
+	int num_regions = 0;
+	int w = width, h = height;
+	int i;
+
+	if ( mip_levels < 1 || mip_levels > (int)ARRAY_LEN( regions ) || total_size <= 0 ) {
+		return;
+	}
+
+	for ( i = 0; i < mip_levels; i++ ) {
+		Com_Memset( &regions[i], 0, sizeof( regions[i] ) );
+		regions[i].bufferOffset = mip_offsets[i];
+		regions[i].bufferRowLength = 0;
+		regions[i].bufferImageHeight = 0;
+		regions[i].imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		regions[i].imageSubresource.mipLevel = i;
+		regions[i].imageSubresource.baseArrayLayer = 0;
+		regions[i].imageSubresource.layerCount = 1;
+		regions[i].imageOffset.x = 0;
+		regions[i].imageOffset.y = 0;
+		regions[i].imageOffset.z = 0;
+		regions[i].imageExtent.width = w;
+		regions[i].imageExtent.height = h;
+		regions[i].imageExtent.depth = 1;
+		(void)mip_sizes;
+		num_regions++;
+		w = ( w > 1 ) ? ( w >> 1 ) : 1;
+		h = ( h > 1 ) ? ( h >> 1 ) : 1;
+	}
+
+#ifdef USE_UPLOAD_QUEUE
+	vk_wait_staging_buffer();
+
+	if ( vk.upload_flush_size && vk.staging_buffer.offset >= vk.upload_flush_size ) {
+		vk_flush_staging_buffer( qfalse );
+	}
+
+	// Vulkan requires compressed VkBufferImageCopy::bufferOffset to be aligned to the
+	// texel block size (16 bytes for ASTC/BC). Align the staging cursor before checking fit.
+	{
+		VkDeviceSize aligned_offset = ( vk.staging_buffer.offset + 15 ) & ~(VkDeviceSize)15;
+		if ( vk.staging_buffer.size < aligned_offset + (VkDeviceSize)total_size ) {
+			vk_flush_staging_buffer( qfalse );
+			aligned_offset = 0;
+		}
+		if ( vk.staging_buffer.size < (VkDeviceSize)total_size ) {
+			vk_alloc_staging_buffer( total_size );
+			aligned_offset = 0;
+		}
+
+		for ( i = 0; i < num_regions; i++ ) {
+			regions[i].bufferOffset += aligned_offset;
+		}
+
+		Com_Memcpy( vk.staging_buffer.ptr + aligned_offset, data, total_size );
+
+		if ( vk.staging_buffer.offset == 0 ) {
+			VkCommandBufferBeginInfo begin_info;
+			begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+			begin_info.pNext = NULL;
+			begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+			begin_info.pInheritanceInfo = NULL;
+			VK_CHECK( qvkBeginCommandBuffer( vk.staging_command_buffer, &begin_info ) );
+		}
+
+		vk.staging_buffer.offset = aligned_offset + (VkDeviceSize)total_size;
+	}
+
+	command_buffer = vk.staging_command_buffer;
+	record_image_layout_transition( command_buffer, image->handle, VK_IMAGE_ASPECT_COLOR_BIT,
+		VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_HOST_BIT, 0 );
+	qvkCmdCopyBufferToImage( command_buffer, vk.staging_buffer.handle, image->handle,
+		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, num_regions, regions );
+	record_image_layout_transition( command_buffer, image->handle, VK_IMAGE_ASPECT_COLOR_BIT,
+		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0, 0 );
+#else
+	if ( vk.staging_buffer.size < (VkDeviceSize)total_size ) {
+		vk_alloc_staging_buffer( total_size );
+	}
+	Com_Memcpy( vk.staging_buffer.ptr, data, total_size );
+	command_buffer = begin_command_buffer();
+	record_image_layout_transition( command_buffer, image->handle, VK_IMAGE_ASPECT_COLOR_BIT,
+		VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_HOST_BIT, 0 );
+	qvkCmdCopyBufferToImage( command_buffer, vk.staging_buffer.handle, image->handle,
+		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, num_regions, regions );
+	record_image_layout_transition( command_buffer, image->handle, VK_IMAGE_ASPECT_COLOR_BIT,
+		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0, 0 );
+	end_command_buffer( command_buffer, __func__ );
+#endif
 }
 
 

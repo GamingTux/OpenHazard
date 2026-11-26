@@ -284,6 +284,10 @@ int  vk_registration_report( char *out, int outSize ); // format the per-map upl
 //
 void vk_create_image( image_t *image, int width, int height, int mip_levels );
 void vk_upload_image_data( image_t *image, int x, int y, int width, int height, int miplevels, byte *pixels, int size, qboolean update );
+qboolean vk_astc_format_supported( VkFormat format );
+void vk_upload_compressed_image( image_t *image, int width, int height, int mip_levels,
+                                 const byte *data, const uint32_t *mip_offsets, const uint32_t *mip_sizes,
+                                 int total_size );
 void vk_update_descriptor_set( image_t *image, qboolean mipmap );
 void vk_destroy_image_resources( VkImage *image, VkImageView *imageView );
 void vk_update_attachment_descriptors( void );
@@ -615,6 +619,8 @@ typedef struct {
 	qboolean active;
 	qboolean wideLines;
 	qboolean samplerAnisotropy;
+	qboolean astcLdr;
+	qboolean bcCompression;
 	qboolean fragmentStores;
 	qboolean dedicatedAllocation;
 	qboolean debugMarkers;

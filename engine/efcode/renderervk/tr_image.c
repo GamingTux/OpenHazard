@@ -202,6 +202,22 @@ void R_ImageList_f( void ) {
 				format = "RGB  ";
 				estSize *= 2;
 				break;
+			case VK_FORMAT_ASTC_4x4_UNORM_BLOCK:
+				format = "ASTC4";
+				estSize = ( ( image->uploadWidth + 3 ) / 4 ) * ( ( image->uploadHeight + 3 ) / 4 ) * 16;
+				break;
+			case VK_FORMAT_ASTC_5x5_UNORM_BLOCK:
+				format = "ASTC5";
+				estSize = ( ( image->uploadWidth + 4 ) / 5 ) * ( ( image->uploadHeight + 4 ) / 5 ) * 16;
+				break;
+			case VK_FORMAT_ASTC_6x6_UNORM_BLOCK:
+				format = "ASTC6";
+				estSize = ( ( image->uploadWidth + 5 ) / 6 ) * ( ( image->uploadHeight + 5 ) / 6 ) * 16;
+				break;
+			case VK_FORMAT_ASTC_8x8_UNORM_BLOCK:
+				format = "ASTC8";
+				estSize = ( ( image->uploadWidth + 7 ) / 8 ) * ( ( image->uploadHeight + 7 ) / 8 ) * 16;
+				break;
 #else
 			case GL_COMPRESSED_RGBA_S3TC_DXT1_EXT:
 			case GL_COMPRESSED_RGB_S3TC_DXT1_EXT:
@@ -1308,6 +1324,236 @@ static const char *R_LoadImage( const char *name, byte **pic, int *width, int *h
 }
 
 
+#ifdef USE_VULKAN
+static uint32_t KTX_ReadU32LE( const byte *p )
+{
+	return (uint32_t)p[0]
+		| ( (uint32_t)p[1] << 8 )
+		| ( (uint32_t)p[2] << 16 )
+		| ( (uint32_t)p[3] << 24 );
+}
+
+/*
+===============
+R_TryLoadKTX1ASTC
+
+Attempts to load a hardware-compressed KTX1 ASTC texture (<name_without_ext>.ktx)
+directly into Vulkan VRAM with precomputed mipmaps. Returns NULL on any miss or
+unsupported GPU so R_FindImageFile transparently falls back to .tga/.jpg.
+===============
+*/
+static image_t *R_TryLoadKTX1ASTC( const char *name, imgFlags_t flags )
+{
+	static const byte ktx1Magic[12] = { 0xAB, 'K', 'T', 'X', ' ', '1', '1', 0xBB, '\r', '\n', 0x1A, '\n' };
+	char stripped[ MAX_QPATH ];
+	char ktxPath[ MAX_QPATH ];
+	union { byte *b; void *v; } fbuf;
+	int flen;
+	uint32_t endianness, glType, glFormat, glInternalFormat;
+	uint32_t pixelWidth, pixelHeight, pixelDepth, arrayElems, numFaces, numMips, kvBytes;
+	VkFormat vkFmt;
+	int bx, by;
+	int baseMip, uploadMips, upW, upH;
+	size_t pos;
+	uint32_t mipOffsets[16];
+	uint32_t mipSizes[16];
+	int totalSize = 0;
+	byte *packed;
+	int m, mw, mh;
+	image_t *image;
+	long hash;
+	int namelen, namelen2;
+	const char *slash, *shortName;
+
+	if ( !vk.astcLdr || !r_ext_compressed_textures->integer )
+		return NULL;
+	if ( flags & ( IMGFLAG_NO_COMPRESSION | IMGFLAG_LIGHTMAP ) )
+		return NULL;
+	if ( tr.mapLoading && r_mapGreyScale->value > 0 )
+		return NULL;
+	if ( r_intensity->value != 1.0f || ( !glConfig.deviceSupportsGamma && !vk.fboActive && r_gamma->value != 1.0f ) )
+		return NULL;
+	if ( name[0] == '*' )
+		return NULL;
+
+	COM_StripExtension( name, stripped, sizeof( stripped ) );
+	if ( !stripped[0] )
+		return NULL;
+	Com_sprintf( ktxPath, sizeof( ktxPath ), "%s.ktx", stripped );
+
+	flen = ri.FS_ReadFile( ktxPath, &fbuf.v );
+	if ( flen < 64 || !fbuf.b )
+		return NULL;
+
+	if ( memcmp( fbuf.b, ktx1Magic, 12 ) != 0 ) {
+		ri.FS_FreeFile( fbuf.v );
+		return NULL;
+	}
+
+	endianness       = KTX_ReadU32LE( fbuf.b + 12 );
+	glType           = KTX_ReadU32LE( fbuf.b + 16 );
+	glFormat         = KTX_ReadU32LE( fbuf.b + 24 );
+	glInternalFormat = KTX_ReadU32LE( fbuf.b + 28 );
+	pixelWidth       = KTX_ReadU32LE( fbuf.b + 36 );
+	pixelHeight      = KTX_ReadU32LE( fbuf.b + 40 );
+	pixelDepth       = KTX_ReadU32LE( fbuf.b + 44 );
+	arrayElems       = KTX_ReadU32LE( fbuf.b + 48 );
+	numFaces         = KTX_ReadU32LE( fbuf.b + 52 );
+	numMips          = KTX_ReadU32LE( fbuf.b + 56 );
+	kvBytes          = KTX_ReadU32LE( fbuf.b + 60 );
+
+	if ( endianness != 0x04030201u || glType != 0 || glFormat != 0 ||
+	     pixelDepth > 1 || arrayElems != 0 || numFaces != 1 ||
+	     pixelWidth == 0 || pixelHeight == 0 ||
+	     (int)pixelWidth > glConfig.maxTextureSize || (int)pixelHeight > glConfig.maxTextureSize ) {
+		ri.FS_FreeFile( fbuf.v );
+		return NULL;
+	}
+
+	switch ( glInternalFormat ) {
+		case 0x93B0u: // GL_COMPRESSED_RGBA_ASTC_4x4_KHR
+		case 0x93D0u: // GL_COMPRESSED_SRGB8_ALPHA8_ASTC_4x4_KHR
+			vkFmt = VK_FORMAT_ASTC_4x4_UNORM_BLOCK; bx = 4; by = 4; break;
+		case 0x93B2u: // GL_COMPRESSED_RGBA_ASTC_5x5_KHR
+		case 0x93D2u:
+			vkFmt = VK_FORMAT_ASTC_5x5_UNORM_BLOCK; bx = 5; by = 5; break;
+		case 0x93B4u: // GL_COMPRESSED_RGBA_ASTC_6x6_KHR
+		case 0x93D4u:
+			vkFmt = VK_FORMAT_ASTC_6x6_UNORM_BLOCK; bx = 6; by = 6; break;
+		case 0x93B7u: // GL_COMPRESSED_RGBA_ASTC_8x8_KHR
+		case 0x93D7u:
+			vkFmt = VK_FORMAT_ASTC_8x8_UNORM_BLOCK; bx = 8; by = 8; break;
+		default:
+			ri.FS_FreeFile( fbuf.v );
+			return NULL;
+	}
+
+	if ( !vk_astc_format_supported( vkFmt ) ) {
+		ri.FS_FreeFile( fbuf.v );
+		return NULL;
+	}
+
+	if ( numMips == 0 ) numMips = 1;
+	if ( numMips > 16 ) numMips = 16;
+
+	pos = 64 + (size_t)kvBytes;
+	if ( pos >= (size_t)flen ) {
+		ri.FS_FreeFile( fbuf.v );
+		return NULL;
+	}
+
+	baseMip = 0;
+	if ( ( flags & IMGFLAG_PICMIP ) && r_picmip->integer > 0 && numMips > 1 ) {
+		baseMip = r_picmip->integer;
+		if ( baseMip >= (int)numMips )
+			baseMip = (int)numMips - 1;
+	}
+	uploadMips = ( flags & IMGFLAG_MIPMAP ) ? ( (int)numMips - baseMip ) : 1;
+	if ( uploadMips < 1 ) uploadMips = 1;
+	if ( uploadMips > 16 ) uploadMips = 16;
+
+	// First pass: validate mip sizes and compute contiguous packed buffer size
+	mw = (int)pixelWidth;
+	mh = (int)pixelHeight;
+	upW = mw;
+	upH = mh;
+	{
+		size_t scan = pos;
+		for ( m = 0; m < baseMip + uploadMips; m++ ) {
+			uint32_t imgSize, expected, padded;
+			if ( scan + 4 > (size_t)flen ) {
+				ri.FS_FreeFile( fbuf.v );
+				return NULL;
+			}
+			imgSize = KTX_ReadU32LE( fbuf.b + scan );
+			scan += 4;
+			expected = (uint32_t)( ( ( mw + bx - 1 ) / bx ) * ( ( mh + by - 1 ) / by ) * 16 );
+			padded = ( imgSize + 3u ) & ~3u;
+			if ( imgSize != expected || scan + imgSize > (size_t)flen ) {
+				ri.FS_FreeFile( fbuf.v );
+				return NULL;
+			}
+			if ( m == baseMip ) {
+				upW = mw;
+				upH = mh;
+			}
+			if ( m >= baseMip ) {
+				int idx = m - baseMip;
+				mipOffsets[idx] = (uint32_t)totalSize;
+				mipSizes[idx] = imgSize;
+				totalSize += (int)imgSize; // ASTC blocks are always 16-byte multiples
+			}
+			scan += padded;
+			mw = ( mw > 1 ) ? ( mw >> 1 ) : 1;
+			mh = ( mh > 1 ) ? ( mh >> 1 ) : 1;
+		}
+	}
+
+	namelen = (int)strlen( name ) + 1;
+	if ( namelen > MAX_QPATH || tr.numImages == MAX_DRAWIMAGES ) {
+		ri.FS_FreeFile( fbuf.v );
+		return NULL;
+	}
+
+	// Second pass: copy selected mip levels contiguously into temp hunk buffer
+	packed = (byte *)ri.Hunk_AllocateTempMemory( totalSize );
+	{
+		size_t scan = pos;
+		for ( m = 0; m < baseMip + uploadMips; m++ ) {
+			uint32_t imgSize = KTX_ReadU32LE( fbuf.b + scan );
+			uint32_t padded = ( imgSize + 3u ) & ~3u;
+			scan += 4;
+			if ( m >= baseMip ) {
+				Com_Memcpy( packed + mipOffsets[m - baseMip], fbuf.b + scan, imgSize );
+			}
+			scan += padded;
+		}
+	}
+
+	R_SyncRenderThread();
+
+	shortName = ( slash = strrchr( ktxPath, '/' ) ) != NULL ? slash + 1 : ktxPath;
+	namelen2 = (int)strlen( shortName ) + 1;
+
+	image = ri.Hunk_Alloc( sizeof( *image ) + namelen + namelen2, h_low );
+	image->imgName = (char *)( image + 1 );
+	strcpy( image->imgName, name );
+	image->imgName2 = image->imgName + namelen;
+	strcpy( image->imgName2, shortName );
+
+	hash = generateHashValue( name );
+	image->next = hashTable[ hash ];
+	hashTable[ hash ] = image;
+	tr.images[ tr.numImages++ ] = image;
+
+	image->flags = flags;
+	image->width = (int)pixelWidth;
+	image->height = (int)pixelHeight;
+	image->uploadWidth = upW;
+	image->uploadHeight = upH;
+	image->internalFormat = vkFmt;
+
+	if ( flags & IMGFLAG_CLAMPTOBORDER )
+		image->wrapClampMode = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+	else if ( flags & IMGFLAG_CLAMPTOEDGE )
+		image->wrapClampMode = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	else
+		image->wrapClampMode = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+
+	image->handle = VK_NULL_HANDLE;
+	image->view = VK_NULL_HANDLE;
+	image->descriptor = VK_NULL_HANDLE;
+
+	vk_create_image( image, upW, upH, uploadMips );
+	vk_upload_compressed_image( image, upW, upH, uploadMips, packed, mipOffsets, mipSizes, totalSize );
+
+	ri.Hunk_FreeTempMemory( packed );
+	ri.FS_FreeFile( fbuf.v );
+	return image;
+}
+#endif // USE_VULKAN
+
+
 /*
 ===============
 R_FindImageFile
@@ -1360,6 +1606,14 @@ image_t	*R_FindImageFile( const char *name, imgFlags_t flags )
 			}
 		}
 	}
+
+#ifdef USE_VULKAN
+	// Prefer hardware-compressed KTX1 ASTC texture when supported by the GPU (Pi 4/5, ARM64, Apple Silicon).
+	image = R_TryLoadKTX1ASTC( name, flags );
+	if ( image ) {
+		return image;
+	}
+#endif
 
 	//
 	// load the pic from disk
