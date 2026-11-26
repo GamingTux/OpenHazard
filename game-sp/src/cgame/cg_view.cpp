@@ -575,6 +575,17 @@ qboolean CG_CalcFOVFromX( float fov_x )
 	float	fov_y;
 	qboolean	inwater;
 
+	if ( cg_fovAspectAdjust.integer && cg.refdef.width > 0 && cg.refdef.height > 0 ) {
+		const float aspect = (float)cg.refdef.width / (float)cg.refdef.height;
+		if ( aspect > ( 4.0f / 3.0f ) + 0.01f ) {
+			const float halfX = (float)tan( fov_x * ( M_PI / 360.0 ) );
+			fov_x = (float)( atan( halfX * ( aspect / ( 4.0f / 3.0f ) ) ) * ( 360.0 / M_PI ) );
+			if ( fov_x > 160.0f ) {
+				fov_x = 160.0f;
+			}
+		}
+	}
+
 	x = cg.refdef.width / tan( fov_x / 360 * M_PI );
 	fov_y = atan2( cg.refdef.height, x );
 	fov_y = fov_y * 360 / M_PI;

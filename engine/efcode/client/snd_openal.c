@@ -35,6 +35,7 @@ cvar_t *s_alGain;
 cvar_t *s_alSources;
 cvar_t *s_alDopplerFactor;
 cvar_t *s_alDopplerSpeed;
+cvar_t *s_alHrtf;
 cvar_t *s_alMinDistance;
 cvar_t *s_alMaxDistance;
 cvar_t *s_alRolloff;
@@ -2539,6 +2540,7 @@ qboolean S_AL_Init( soundInterface_t *si )
 	s_alSources = Cvar_Get( "s_alSources", "96", CVAR_ARCHIVE );
 	s_alDopplerFactor = Cvar_Get( "s_alDopplerFactor", "1.0", CVAR_ARCHIVE );
 	s_alDopplerSpeed = Cvar_Get( "s_alDopplerSpeed", "9000", CVAR_ARCHIVE );
+	s_alHrtf = Cvar_Get( "s_alHrtf", "-1", CVAR_ARCHIVE | CVAR_LATCH );
 	s_alMinDistance = Cvar_Get( "s_alMinDistance", "120", CVAR_CHEAT );
 	s_alMaxDistance = Cvar_Get("s_alMaxDistance", "1024", CVAR_CHEAT);
 	s_alRolloff = Cvar_Get( "s_alRolloff", "2", CVAR_CHEAT);
@@ -2637,16 +2639,48 @@ qboolean S_AL_Init( soundInterface_t *si )
 		return qfalse;
 	}
 
-	// Create OpenAL context
-	alContext = qalcCreateContext( alDevice, NULL );
-	if( !alContext )
+	// Create OpenAL context (optionally configuring ALC_SOFT_HRTF for 3D headphone spatialization)
 	{
-		QAL_Shutdown( );
-		qalcCloseDevice( alDevice );
-		Com_Printf( "Failed to create OpenAL context.\n" );
-		return qfalse;
+		ALCint attrs[3] = { 0, 0, 0 };
+		const ALCint *attrPtr = NULL;
+		qboolean hasHrtfExt = qalcIsExtensionPresent( alDevice, "ALC_SOFT_HRTF" ) ? qtrue : qfalse;
+
+		if ( hasHrtfExt )
+		{
+			attrs[0] = 0x1992; // ALC_HRTF_SOFT
+			if ( s_alHrtf->integer > 0 )
+				attrs[1] = ALC_TRUE;
+			else if ( s_alHrtf->integer == 0 )
+				attrs[1] = ALC_FALSE;
+			else
+				attrs[1] = 0x0002; // ALC_DONT_CARE_SOFT (auto on headphones)
+			attrs[2] = 0;
+			attrPtr = attrs;
+		}
+
+		alContext = qalcCreateContext( alDevice, attrPtr );
+		if( !alContext && attrPtr )
+		{
+			alContext = qalcCreateContext( alDevice, NULL );
+		}
+		if( !alContext )
+		{
+			QAL_Shutdown( );
+			qalcCloseDevice( alDevice );
+			Com_Printf( "Failed to create OpenAL context.\n" );
+			return qfalse;
+		}
+		qalcMakeContextCurrent( alContext );
+
+		if ( hasHrtfExt )
+		{
+			ALCint hrtfStatus = 0;
+			qalcGetIntegerv( alDevice, 0x1993 /* ALC_HRTF_STATUS_SOFT */, 1, &hrtfStatus );
+			Com_Printf( "  HRTF:           %s (s_alHrtf=%d)\n",
+				( hrtfStatus == 1 || hrtfStatus == 3 ) ? "enabled (3D binaural)" : "disabled (stereo)",
+				s_alHrtf->integer );
+		}
 	}
-	qalcMakeContextCurrent( alContext );
 
 	// Initialize sources, buffers, music
 	S_AL_BufferInit( );

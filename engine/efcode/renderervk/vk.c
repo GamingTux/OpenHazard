@@ -922,21 +922,21 @@ static void vk_create_render_passes( void )
 	depth_format = vk.depth_format;
 	device = vk.device;
 
-	if ( r_fbo->integer == 0 )
+	if ( !vk.fboActive )
 	{
-		// presentation
+		// presentation (or direct-to-swapchain MSAA resolve target)
 		attachments[0].flags = 0;
 		attachments[0].format = vk.present_format.format;
 		attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
 #ifdef USE_BUFFER_CLEAR
-		attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+		attachments[0].loadOp = vk.msaaActive ? VK_ATTACHMENT_LOAD_OP_DONT_CARE : VK_ATTACHMENT_LOAD_OP_CLEAR;
 #else
 		attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;	// Assuming this will be completely overwritten
 #endif
 		attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;		// needed for presentation
 		attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 		attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-		attachments[0].initialLayout = vk.initSwapchainLayout;
+		attachments[0].initialLayout = vk.msaaActive ? VK_IMAGE_LAYOUT_UNDEFINED : vk.initSwapchainLayout;
 		attachments[0].finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 	}
 	else
@@ -1001,7 +1001,7 @@ static void vk_create_render_passes( void )
 	if ( vk.msaaActive )
 	{
 		attachments[2].flags = 0;
-		attachments[2].format = vk.color_format;
+		attachments[2].format = vk.fboActive ? vk.color_format : vk.present_format.format;
 		attachments[2].samples = vkSamples;
 #ifdef USE_BUFFER_CLEAR
 		attachments[2].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
@@ -1041,7 +1041,7 @@ static void vk_create_render_passes( void )
 	deps[2].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;			// What access scopes are waiting on the dependency
 	deps[2].dependencyFlags = 0;
 
-	if ( r_fbo->integer == 0 )
+	if ( !vk.fboActive )
 	{
 		desc.dependencyCount = 1;
 		desc.pDependencies = &deps[2];
@@ -2703,6 +2703,9 @@ static VkSampler vk_find_sampler( const Vk_Sampler_Def *def ) {
 		desc.anisotropyEnable = (r_ext_texture_filter_anisotropic->integer && vk.samplerAnisotropy) ? VK_TRUE : VK_FALSE;
 		if ( desc.anisotropyEnable ) {
 			desc.maxAnisotropy = MIN( r_ext_max_anisotropy->integer, vk.maxAnisotropy );
+			if ( !def->max_lod_1_0 && r_mipLodBias && r_mipLodBias->value != 0.0f ) {
+				desc.mipLodBias = Com_Clamp( -1.0f, 1.0f, r_mipLodBias->value );
+			}
 		}
 	}
 
@@ -3548,8 +3551,9 @@ void vk_create_blur_pipeline( uint32_t index, uint32_t width, uint32_t height, q
 // plus hardware bilinear downsampling on extraction for smoother anti-aliased highlights).
 static void vk_bloom_base_dims( uint32_t *w, uint32_t *h )
 {
-	uint32_t bw = gls.captureWidth / 2;
-	uint32_t bh = gls.captureHeight / 2;
+	uint32_t div = ( vk.bloomDownscale >= 2u ) ? vk.bloomDownscale : 2u;
+	uint32_t bw = gls.captureWidth / div;
+	uint32_t bh = gls.captureHeight / div;
 	if ( bw < 16 ) bw = gls.captureWidth;
 	if ( bh < 16 ) bh = gls.captureHeight;
 	*w = bw;
@@ -3906,17 +3910,6 @@ static void vk_create_attachments( void )
 		// screenmap depth
 		create_depth_attachment( vk.screenMapWidth, vk.screenMapHeight, vk.screenMapSamples, &vk.screenMap.depth_image, &vk.screenMap.depth_image_view, qtrue );
 
-		if ( vk.msaaActive ) {
-			// Transient: the render pass never stores the multisampled
-			// attachment (bloom reads the resolved image instead), so it can
-			// live in TRANSIENT/LAZILY_ALLOCATED memory. (Storing into
-			// transient memory is what produced banded corruption on Adreno;
-			// with the store gone the conflict is gone.)
-			create_color_attachment( glConfig.vidWidth, glConfig.vidHeight, vkSamples, vk.color_format,
-				VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, &vk.msaa_image, &vk.msaa_image_view, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-				qtrue );
-		}
-
 		if ( r_ext_supersample->integer ) {
 			// capture buffer
 			usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
@@ -3924,6 +3917,16 @@ static void vk_create_attachments( void )
 				usage, &vk.capture.image, &vk.capture.image_view, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, qfalse );
 		}
 	} // if ( vk.fboActive )
+
+	if ( vk.msaaActive ) {
+		// Transient: the render pass never stores the multisampled
+		// attachment (it resolves directly into either color_image or the
+		// swapchain image), so it stays tile-local / LAZILY_ALLOCATED on TBDR GPUs.
+		create_color_attachment( glConfig.vidWidth, glConfig.vidHeight, vkSamples,
+			vk.fboActive ? vk.color_format : vk.present_format.format,
+			VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, &vk.msaa_image, &vk.msaa_image_view, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+			qtrue );
+	}
 
 	//vk_alloc_attachments();
 
@@ -3970,12 +3973,17 @@ static void vk_create_framebuffers( void )
 	{
 		desc.renderPass = vk.render_pass.main;
 		desc.attachmentCount = 2;
-		if ( r_fbo->integer == 0 )
+		if ( !vk.fboActive )
 		{
 			desc.width = gls.windowWidth;
 			desc.height = gls.windowHeight;
 			attachments[0] = vk.swapchain_image_views[n];
 			attachments[1] = vk.depth_image_view;
+			if ( vk.msaaActive )
+			{
+				desc.attachmentCount = 3;
+				attachments[2] = vk.msaa_image_view;
+			}
 			VK_CHECK( qvkCreateFramebuffer( vk.device, &desc, NULL, &vk.framebuffers.main[n] ) );
 
 			SET_OBJECT_NAME( vk.framebuffers.main[n], va( "framebuffer - main %i", n ), VK_DEBUG_REPORT_OBJECT_TYPE_FRAMEBUFFER_EXT );
@@ -4554,15 +4562,10 @@ void vk_initialize( void )
 
 	vk_set_render_scale();
 
-	if ( r_fbo->integer ) {
-		vk.fboActive = qtrue;
-		vk.msaaActive = r_ext_multisample->integer ? qtrue : qfalse;
-		vk.bloomActive = r_bloom->integer ? qtrue : qfalse;
-	} else {
-		vk.fboActive = qfalse;
-		vk.msaaActive = qfalse;
-		vk.bloomActive = qfalse;
-	}
+	vk.fboActive = r_fbo->integer ? qtrue : qfalse;
+	vk.msaaActive = r_ext_multisample->integer ? qtrue : qfalse;
+	vk.bloomActive = ( vk.fboActive && r_bloom->integer ) ? qtrue : qfalse;
+	vk.bloomDownscale = ( r_bloom_downscale->integer >= 2 ) ? (uint32_t)r_bloom_downscale->integer : 2u;
 
 	// multisampling
 
@@ -4674,8 +4677,11 @@ void vk_initialize( void )
 				props.deviceName, vk.msaaActive ? (int)vkMaxSamples : 0 );
 		} else if ( Q_stristr( props.deviceName, "V3D 7." ) ) {
 			vk.maxAnisotropy = MIN( vk.maxAnisotropy, 8.0f );
-			ri.Printf( PRINT_ALL, "...GPU auto-tune: VideoCore VII / Pi 5 (%s) -> 4x MSAA, 8x AF, half-res bloom (set r_gpuAutoTune 0 to override)\n",
-				props.deviceName );
+			if ( r_bloom_downscale->integer == 0 ) {
+				vk.bloomDownscale = 4u;
+			}
+			ri.Printf( PRINT_ALL, "...GPU auto-tune: VideoCore VII / Pi 5 (%s) -> 4x MSAA, 8x AF, %s bloom (set r_gpuAutoTune 0 to override)\n",
+				props.deviceName, ( vk.bloomDownscale >= 4u ) ? "quarter-res" : "half-res" );
 		}
 	}
 

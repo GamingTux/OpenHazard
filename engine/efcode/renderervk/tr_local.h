@@ -1484,6 +1484,8 @@ extern cvar_t	*r_bloom_threshold;
 extern cvar_t	*r_bloom_intensity;
 extern cvar_t	*r_bloom_threshold_mode;
 extern cvar_t	*r_bloom_modulate;
+extern cvar_t	*r_bloom_downscale;
+extern cvar_t	*r_mipLodBias;
 extern cvar_t	*r_ext_multisample;
 extern cvar_t	*r_ext_supersample;
 extern cvar_t	*r_ext_alpha_to_coverage;

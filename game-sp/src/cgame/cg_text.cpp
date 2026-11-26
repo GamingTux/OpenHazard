@@ -271,7 +271,7 @@ void CG_CaptionText( const char *str, int sound, int y, int charWidth )
 
 	cg.captionTextTime = cg.time;
 	if (in_camera) {
-		cg.captionTextY = SCREEN_HEIGHT;
+		cg.captionTextY = SCREEN_HEIGHT - SMALLCHAR_HEIGHT;
 	} else {	//get above the hud
 		cg.captionTextY = SCREEN_HEIGHT - SMALLCHAR_HEIGHT * 3;
 	}

@@ -640,6 +640,7 @@ typedef struct {
 	qboolean blitEnabled;
 	qboolean msaaActive;
 	qboolean bloomActive;
+	uint32_t bloomDownscale;
 
 	qboolean offscreenRender;
 
