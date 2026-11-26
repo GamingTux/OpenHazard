@@ -109,6 +109,16 @@ void Sys_SetFloatEnv(void)
 
 /*
 ================
+Sys_SetDefaultHomePath
+================
+*/
+void Sys_SetDefaultHomePath( const char *path )
+{
+	Q_strncpyz( homePath, path ? path : "", sizeof( homePath ) );
+}
+
+/*
+================
 Sys_DefaultHomePath
 ================
 */
