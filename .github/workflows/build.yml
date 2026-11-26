@@ -101,7 +101,7 @@ jobs:
       - name: Bundle SDL2 & MoltenVK dylibs + Package (.tar.gz)
         run: |
           BREW_PREFIX="$(brew --prefix)"
-          STAGE="build/pkg/OpenHazard-1.0.0-macos-${{ matrix.arch }}"
+          STAGE="build/pkg/OpenHazard-1.0.1-macos-${{ matrix.arch }}"
           mkdir -p "${STAGE}"
           cmake --install build --prefix "${STAGE}"
           cp -L "${BREW_PREFIX}/lib/libSDL2-2.0.0.dylib" "${STAGE}/"
@@ -113,7 +113,7 @@ jobs:
               install_name_tool -change "${SDL_DEP}" "@loader_path/libSDL2-2.0.0.dylib" "${bin}"
             fi
           done
-          tar -czf "build/OpenHazard-1.0.0-macos-${{ matrix.arch }}.tar.gz" -C build/pkg "OpenHazard-1.0.0-macos-${{ matrix.arch }}"
+          tar -czf "build/OpenHazard-1.0.1-macos-${{ matrix.arch }}.tar.gz" -C build/pkg "OpenHazard-1.0.1-macos-${{ matrix.arch }}"
           ls -lh build/OpenHazard-*.tar.gz
 
       - name: Upload artifact
@@ -175,12 +175,12 @@ jobs:
       - name: Stage SDL2.dll & Package portable archive (.zip)
         shell: pwsh
         run: |
-          $stage = "build\pkg\OpenHazard-1.0.0-windows-${{ matrix.arch }}"
+          $stage = "build\pkg\OpenHazard-1.0.1-windows-${{ matrix.arch }}"
           cmake --install build --config Release --prefix $stage
           if (Test-Path "$env:SDL2_DLL_PATH") {
             Copy-Item "$env:SDL2_DLL_PATH" "$stage\SDL2.dll" -Force
           }
-          Compress-Archive -Path $stage -DestinationPath "build\OpenHazard-1.0.0-windows-${{ matrix.arch }}.zip" -CompressionLevel Optimal
+          Compress-Archive -Path $stage -DestinationPath "build\OpenHazard-1.0.1-windows-${{ matrix.arch }}.zip" -CompressionLevel Optimal
           Get-ChildItem build\OpenHazard-*.zip
 
       - name: Upload artifact

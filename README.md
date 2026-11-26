@@ -32,12 +32,13 @@
 ## Key Features
 
 - **Unified 64-Bit Engine & Vulkan Renderer (`engine/`):** Built on `lilium-voyager` + `Quake3e` `renderervk` (`renderer_vulkan.{so,dylib,dll}`) shared across `openhazard-sp`, `openhazard-mp`, and `openhazard-ded`.
-- **Singleplayer + Built-in Cutscenes:** Native 64-bit `efgame` / `efui` modules (`efspconfig.cfg`) with a statically linked, LGPLv2.1+ **Bink-only FFmpeg 7.1.1** decoder — full `.bik` intro and mission videos with zero external FFmpeg dependencies.
+- **Singleplayer + Skippable Cutscenes & Built-in Bink:** Native 64-bit `efgame` / `efui` modules (`efspconfig.cfg`) with a statically linked, LGPLv2.1+ **Bink-only FFmpeg 7.1.1** decoder, instant cutscene & FMV skipping (`Space`/`Enter`/`ESC`/Gamepad), and true **Hor+ Widescreen FOV** (`cg_fovAspectAdjust 1`).
 - **100% Retail Multiplayer Compatibility:** `openhazard-mp` (`hmconfig.cfg`) and `openhazard-ded` (`hmconfig_server.cfg`) execute unmodified retail QVMs (`ui.qvm`, `cgame.qvm`, `qagame.qvm`) via native **ARM64 (`vm_aarch64.c`)** and **x86_64 (`vm_x86.c`)** JIT compilers, with active community master servers (`master.stvef.org`, `master.stef1.daggolin.de`, `efmaster.tjps.eu`) and dynamic `libcurl` HTTP fast map downloads.
 - **Modern Vulkan Visuals & TBDR Optimizations:**
-  - **4× MSAA**, **Alpha-to-Coverage** (`r_ext_alpha_to_coverage 1`), **Per-Pixel Dynamic Lights** (`r_dlightMode 2`), **Half-Resolution Bloom Pyramid** (`r_bloom 1`), **Trilinear + Anisotropic Filtering**, **Flares**, and **Triangle-Mesh Decals**.
+  - **Direct-to-Swapchain 4× MSAA** (transient on-chip resolve even with `r_fbo 0`), **Alpha-to-Coverage** (`r_ext_alpha_to_coverage 1`), **Per-Pixel Dynamic Lights** (`r_dlightMode 2`, `r_dlightScale 0.9`), **Quarter/Half-Resolution Bloom Pyramid** (`r_bloom 1`, `r_bloom_downscale`), **Hardware Sampler LOD Bias** (`r_mipLodBias -0.35`), **Trilinear + Anisotropic Filtering**, **Flares**, and **Triangle-Mesh Decals**.
+  - **Native Hardware-ASTC Texture Packs (KTX1):** Automatic `textureCompressionASTC_LDR` loading (`r_ext_compressed_textures 1`) for `.ktx` ASTC `4×4`/`5×5`/`6×6`/`8×8` packs with precomputed mipmaps on ARM64 / Raspberry Pi 4–5 / Apple Silicon (~70 % VRAM savings) and seamless fallback to `.tga`/`.jpg` on non-ASTC desktop GPUs.
   - **TBDR / SBC Performance:** Zero-load `VK_IMAGE_LAYOUT_UNDEFINED` render passes, zero-shader `vkCmdCopyImage` swapchain fastpath, O(1) pipeline lookup hash table, pure-depth mode (stencil off unless `cg_shadows 2`), low-latency `MAILBOX` presentation (`r_swapInterval 2`), and automatic **GPU Auto-Tune** (`r_gpuAutoTune 1`) for Raspberry Pi 4 (`V3D 4.x`), Raspberry Pi 5 (`V3D 7.x`), CPU rasterizers, and Desktop GPUs.
-- **Audio & Widescreen Polish:** Native **OpenAL 3D spatial audio** (`s_useOpenAL 1`, automatic SDL fallback) with accurate SP dialog/subtitle timing and Bink A/V pacing, plus full **16:9 widescreen menus** in both Singleplayer and Holomatch Multiplayer.
+- **Audio & Widescreen Polish:** Native **OpenAL 3D spatial audio** (`s_useOpenAL 1`, automatic SDL fallback) with **OpenAL Soft HRTF** (`s_alHrtf`), accurate SP dialog/subtitle timing and Bink A/V pacing, plus full **16:9 widescreen menus** and Hor+ framing in Singleplayer and Holomatch Multiplayer.
 - **Universal ARM64 & Cross-Platform Portability:** Dynamic page-size JIT (`sysconf(_SC_PAGESIZE)` + Apple Silicon `MAP_JIT` / `pthread_jit_write_protect_np` + Windows ARM64 `VirtualAlloc` / `FlushInstructionCache`), `64 KB` ELF alignment (`-Wl,-z,max-page-size=65536`), and automatic `VK_KHR_portability_subset` for macOS MoltenVK.
 
 ---
@@ -48,12 +49,12 @@ Every push and release tag builds **6 self-contained, single-folder portable arc
 
 | Platform | Architecture | Portable Archive |
 |---|---|---|
-| Linux | `x86_64` | `OpenHazard-1.0.0-linux-x86_64.tar.gz` |
-| Linux (Raspberry Pi 4/5, SBCs) | `arm64` | `OpenHazard-1.0.0-linux-arm64.tar.gz` |
-| macOS (Apple Silicon) | `arm64` | `OpenHazard-1.0.0-macos-arm64.tar.gz` |
-| macOS (Intel) | `x86_64` | `OpenHazard-1.0.0-macos-x86_64.tar.gz` |
-| Windows | `x86_64` | `OpenHazard-1.0.0-windows-x86_64.zip` |
-| Windows | `arm64` | `OpenHazard-1.0.0-windows-arm64.zip` |
+| Linux | `x86_64` | `OpenHazard-1.0.1-linux-x86_64.tar.gz` |
+| Linux (Raspberry Pi 4/5, SBCs) | `arm64` | `OpenHazard-1.0.1-linux-arm64.tar.gz` |
+| macOS (Apple Silicon) | `arm64` | `OpenHazard-1.0.1-macos-arm64.tar.gz` |
+| macOS (Intel) | `x86_64` | `OpenHazard-1.0.1-macos-x86_64.tar.gz` |
+| Windows | `x86_64` | `OpenHazard-1.0.1-windows-x86_64.zip` |
+| Windows | `arm64` | `OpenHazard-1.0.1-windows-arm64.zip` |
 
 ### Game Data Directory
 
