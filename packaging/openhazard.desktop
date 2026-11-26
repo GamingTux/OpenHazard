@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=OpenHazard
+GenericName=Star Trek: Voyager - Elite Force (Singleplayer)
+Comment=Native Linux Vulkan port of Star Trek: Voyager - Elite Force
+Exec=openhazard
+Terminal=false
+Categories=Game;ActionGame;
+Keywords=OpenHazard;Star Trek;Voyager;Elite Force;FPS;Vulkan;

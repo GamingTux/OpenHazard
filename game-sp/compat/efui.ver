@@ -1,0 +1,6 @@
+EFUI_1.0 {
+  global:
+    OH_GetUIAPI;
+    _Z8GetUIAPIv;
+  local: *;
+};

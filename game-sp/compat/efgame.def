@@ -1,0 +1,4 @@
+EXPORTS
+    OH_GetGameAPI
+    OH_dllEntry
+    OH_vmMain

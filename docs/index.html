@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OpenHazard — Native 64-Bit Vulkan Port of Star Trek: Voyager – Elite Force</title>
+  <meta name="description" content="OpenHazard is a portable, native 64-bit Vulkan port of Star Trek: Voyager – Elite Force (Singleplayer, Holomatch Multiplayer & Dedicated Server) for Linux, macOS, Windows, and Raspberry Pi 4/5." />
+  <style>
+    :root {
+      --bg: #080b12;
+      --surface: #111726;
+      --surface-2: #172033;
+      --border: #24324d;
+      --text: #e6edf7;
+      --muted: #9aa9c4;
+      --lcars-amber: #ff9f1c;
+      --lcars-gold: #ffc46b;
+      --lcars-blue: #4ea8de;
+      --lcars-violet: #9d79ff;
+      --lcars-teal: #2ec4b6;
+      --radius: 14px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, Helvetica, Arial, sans-serif;
+      background:
+        radial-gradient(ellipse 80% 50% at 50% -10%, rgba(78, 168, 222, 0.16), transparent 60%),
+        radial-gradient(ellipse 60% 40% at 90% 10%, rgba(255, 159, 28, 0.10), transparent 55%),
+        var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    a { color: var(--lcars-blue); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .lcars-bar {
+      height: 5px;
+      background: linear-gradient(90deg, var(--lcars-amber) 0 28%, var(--lcars-violet) 28% 52%, var(--lcars-blue) 52% 82%, var(--lcars-teal) 82% 100%);
+    }
+
+    .container {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    header {
+      border-bottom: 1px solid var(--border);
+      background: rgba(8, 11, 18, 0.85);
+      backdrop-filter: blur(10px);
+      position: sticky;
+      top: 0;
+      z-index: 20;
+    }
+
+    .nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 64px;
+      gap: 16px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 800;
+      font-size: 1.15rem;
+      letter-spacing: 0.04em;
+      color: var(--text);
+    }
+
+    .brand-pill {
+      display: inline-block;
+      width: 12px;
+      height: 24px;
+      border-radius: 6px;
+      background: linear-gradient(180deg, var(--lcars-amber), var(--lcars-violet));
+    }
+
+    .nav-links {
+      display: flex;
+      gap: 22px;
+      font-size: 0.92rem;
+      font-weight: 500;
+    }
+
+    .nav-links a { color: var(--muted); }
+    .nav-links a:hover { color: var(--text); text-decoration: none; }
+
+    .hero {
+      padding: 72px 0 56px;
+      text-align: center;
+    }
+
+    .badge-row {
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 22px;
+    }
+
+    .pill {
+      font-size: 0.78rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      padding: 5px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--lcars-gold);
+    }
+
+    .pill.blue { color: var(--lcars-blue); }
+    .pill.teal { color: var(--lcars-teal); }
+
+    h1 {
+      font-size: clamp(2.3rem, 5vw, 3.8rem);
+      font-weight: 900;
+      letter-spacing: -0.02em;
+      line-height: 1.1;
+      margin-bottom: 18px;
+      background: linear-gradient(95deg, #ffffff 10%, var(--lcars-gold) 55%, var(--lcars-blue) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .subtitle {
+      max-width: 760px;
+      margin: 0 auto 30px;
+      color: var(--muted);
+      font-size: 1.12rem;
+    }
+
+    .cta-row {
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 14px;
+      margin-bottom: 28px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 24px;
+      border-radius: 999px;
+      font-weight: 700;
+      font-size: 0.96rem;
+      transition: transform 0.15s ease, filter 0.15s ease;
+    }
+
+    .btn:hover { transform: translateY(-1px); text-decoration: none; filter: brightness(1.08); }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--lcars-amber), #ff7b00);
+      color: #0b0f17;
+    }
+
+    .btn-secondary {
+      background: var(--surface-2);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+
+    .notice {
+      max-width: 720px;
+      margin: 0 auto;
+      font-size: 0.88rem;
+      color: var(--muted);
+      background: rgba(255, 159, 28, 0.08);
+      border: 1px solid rgba(255, 159, 28, 0.28);
+      border-radius: 10px;
+      padding: 10px 16px;
+    }
+
+    section {
+      padding: 48px 0;
+    }
+
+    h2 {
+      font-size: 1.75rem;
+      font-weight: 800;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    h2::before {
+      content: "";
+      display: inline-block;
+      width: 6px;
+      height: 24px;
+      border-radius: 4px;
+      background: var(--lcars-amber);
+    }
+
+    .section-lead {
+      color: var(--muted);
+      margin-bottom: 26px;
+    }
+
+    .gallery {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 20px;
+    }
+
+    .shot {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+
+    .shot img {
+      display: block;
+      width: 100%;
+      height: auto;
+      aspect-ratio: 16 / 9;
+      object-fit: cover;
+    }
+
+    .shot figcaption {
+      padding: 12px 16px;
+      font-size: 0.9rem;
+      color: var(--muted);
+      border-top: 1px solid var(--border);
+    }
+
+    .shot figcaption strong { color: var(--text); }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 18px;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 22px;
+    }
+
+    .card h3 {
+      font-size: 1.05rem;
+      margin-bottom: 8px;
+      color: var(--lcars-gold);
+    }
+
+    .card p {
+      font-size: 0.93rem;
+      color: var(--muted);
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.92rem;
+    }
+
+    th, td {
+      padding: 12px 16px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+
+    th {
+      background: var(--surface-2);
+      color: var(--lcars-gold);
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    tr:last-child td { border-bottom: none; }
+    .yes { color: var(--lcars-teal); font-weight: 700; }
+    .no { color: #f87171; }
+    .highlight-row { background: rgba(78, 168, 222, 0.08); }
+
+    pre {
+      background: #0b101b;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px 20px;
+      overflow-x: auto;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.88rem;
+      line-height: 1.55;
+      color: #d7e4f8;
+    }
+
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.88em;
+      background: rgba(78, 168, 222, 0.12);
+      padding: 2px 6px;
+      border-radius: 5px;
+      color: var(--lcars-blue);
+    }
+
+    pre code {
+      background: none;
+      padding: 0;
+      color: inherit;
+    }
+
+    footer {
+      margin-top: 40px;
+      border-top: 1px solid var(--border);
+      padding: 28px 0 44px;
+      color: var(--muted);
+      font-size: 0.86rem;
+    }
+
+    .footer-inner {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 14px;
+    }
+
+    @media (max-width: 640px) {
+      .nav-links { display: none; }
+      .hero { padding: 48px 0 36px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="lcars-bar"></div>
+  <header>
+    <div class="container nav">
+      <a class="brand" href="#">
+        <span class="brand-pill"></span>
+        OPENHAZARD
+      </a>
+      <nav class="nav-links">
+        <a href="#screenshots">Screenshots</a>
+        <a href="#features">Features</a>
+        <a href="#comparison">Comparison</a>
+        <a href="#downloads">Downloads</a>
+        <a href="#build">Build</a>
+        <a href="https://github.com/GamingTux/OpenHazard">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="hero">
+      <div class="badge-row">
+        <span class="pill">64-Bit Native Vulkan</span>
+        <span class="pill blue">Singleplayer + Holomatch MP + Dedicated</span>
+        <span class="pill teal">Linux · macOS · Windows · Pi 4/5</span>
+      </div>
+      <h1>Star Trek: Voyager – Elite Force,<br />Rebuilt for Modern 64-Bit Vulkan</h1>
+      <p class="subtitle">
+        <strong>OpenHazard</strong> unifies Singleplayer, Holomatch Multiplayer, and the Dedicated Server
+        on one clean 64-bit engine and Vulkan renderer — with built-in Bink cutscenes, native ARM64/x86_64
+        QVM JIT, OpenAL 3D audio, and Raspberry Pi 5 TBDR optimizations.
+      </p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="https://github.com/GamingTux/OpenHazard/actions/workflows/build.yml">Download Portable Builds</a>
+        <a class="btn btn-secondary" href="https://github.com/GamingTux/OpenHazard">View Source on GitHub</a>
+      </div>
+      <div class="notice">
+        <strong>No retail game assets included:</strong> You need your own legally owned
+        <code>pak0.pk3</code>–<code>pak3.pk3</code> and <code>efgamex86.dll</code> from an original CD or GOG installation.
+      </div>
+    </section>
+
+    <section id="screenshots">
+      <h2>Live on Raspberry Pi 5 (1920×1080 Vulkan)</h2>
+      <p class="section-lead">Running natively on Broadcom VideoCore VII (Mesa V3DV) with 4× MSAA, half-res bloom, per-pixel dynamic lights, and 16:9 widescreen UI.</p>
+      <div class="gallery">
+        <figure class="shot">
+          <img src="images/sp-borg2-vulkan.jpg" alt="OpenHazard Singleplayer Borg Cube running on Raspberry Pi 5 Vulkan" loading="lazy" />
+          <figcaption><strong>Singleplayer (<code>borg2</code>)</strong> — 4× MSAA, Alpha-to-Coverage, Half-Res Bloom &amp; Per-Pixel Dynamic Lights (~70 FPS @ 1080p on Pi 5).</figcaption>
+        </figure>
+        <figure class="shot">
+          <img src="images/mp-holomatch-16x9.jpg" alt="OpenHazard Holomatch Multiplayer 16:9 menu on Raspberry Pi 5" loading="lazy" />
+          <figcaption><strong>Holomatch Multiplayer</strong> — Native 16:9 widescreen UI, 100% retail QVM server compatibility, and active community master servers.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section id="features">
+      <h2>Engine Highlights</h2>
+      <p class="section-lead">One unified codebase for desktop PCs, Apple Silicon Macs, and ARM64 single-board computers.</p>
+      <div class="grid">
+        <div class="card">
+          <h3>Unified SP + MP + Dedicated</h3>
+          <p><code>openhazard-sp</code>, <code>openhazard-mp</code>, and <code>openhazard-ded</code> share the exact same 64-bit engine and <code>renderer_vulkan</code> library. Retail QVMs run unaltered for full online server compatibility.</p>
+        </div>
+        <div class="card">
+          <h3>Built-in Bink Cutscenes</h3>
+          <p>A minimal, statically linked LGPLv2.1+ FFmpeg 7.1.1 Bink-only decoder is embedded into <code>openhazard-sp</code> — intro and mission <code>.bik</code> videos work out of the box with zero external FFmpeg dependencies.</p>
+        </div>
+        <div class="card">
+          <h3>Modern Vulkan + TBDR Tuning</h3>
+          <p>4× MSAA, Alpha-to-Coverage, Per-Pixel Dlights, Half-Res Bloom Pyramid, zero-load TBDR layouts, zero-shader <code>vkCmdCopyImage</code> swapchain fastpath, pure-depth mode, and low-latency <code>MAILBOX</code> pacing.</p>
+        </div>
+        <div class="card">
+          <h3>Universal ARM64 &amp; 16 KB Pages</h3>
+          <p>Portable ARMv8.0-A baseline with 64 KB ELF alignment and dynamic page-size <code>vm_aarch64.c</code> JIT — one Linux ARM64 binary runs on Raspberry Pi 4 (4 KB), Pi 5 (16 KB), RK3588, and 64 KB kernels.</p>
+        </div>
+        <div class="card">
+          <h3>GPU Auto-Tune Profiles</h3>
+          <p>Automatically adapts MSAA, anisotropy, and bloom caps for Raspberry Pi 4 (<code>V3D 4.x</code>), Raspberry Pi 5 (<code>V3D 7.x</code>), and CPU software rasterizers — while desktop GPUs run at full fidelity (<code>r_gpuAutoTune 0</code> to override).</p>
+        </div>
+        <div class="card">
+          <h3>OpenAL 3D Audio &amp; HTTP FastDL</h3>
+          <p>OpenAL Soft 3D spatial sound with accurate SP subtitle/dialog timing and automatic SDL fallback, plus dynamically loaded <code>libcurl</code> HTTP fast map downloads for Holomatch servers.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="comparison">
+      <h2>How OpenHazard Compares</h2>
+      <p class="section-lead">Bridging the gap left by multiplayer-only Linux ports and 32-bit x86 compatibility wrappers.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Port / Method</th>
+              <th>Singleplayer</th>
+              <th>Holomatch MP</th>
+              <th>Native Vulkan</th>
+              <th>Native ARM64 / Pi 5</th>
+              <th>Built-in Bink (<code>.bik</code>)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>ioef-cmod</code></td>
+              <td class="no">No</td>
+              <td class="yes">Yes</td>
+              <td class="no">No (OpenGL)</td>
+              <td>Limited</td>
+              <td class="no">No</td>
+            </tr>
+            <tr>
+              <td><code>lilium-voyager</code></td>
+              <td class="no">No</td>
+              <td class="yes">Yes</td>
+              <td class="no">No (OpenGL)</td>
+              <td>Untested</td>
+              <td class="no">No</td>
+            </tr>
+            <tr>
+              <td>GOG + Wine / Proton</td>
+              <td class="yes">Yes (32-bit x86)</td>
+              <td class="yes">Yes</td>
+              <td>Wrapper</td>
+              <td class="no">No (x86 emu only)</td>
+              <td class="yes">Yes</td>
+            </tr>
+            <tr class="highlight-row">
+              <td><strong>OpenHazard</strong></td>
+              <td class="yes">Yes (64-bit native)</td>
+              <td class="yes">Yes (Retail QVMs)</td>
+              <td class="yes">Yes (Quake3e)</td>
+              <td class="yes">Yes (4 / 16 / 64 KB)</td>
+              <td class="yes">Yes (static FFmpeg)</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="downloads">
+      <h2>Portable Packages (6 Targets via GitHub Actions)</h2>
+      <p class="section-lead">Self-contained single-folder archives — extract, point to your retail <code>baseEF</code> data, and play.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Platform</th>
+              <th>Architecture</th>
+              <th>Archive Format</th>
+              <th>Data Directory</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Linux</td>
+              <td><code>x86_64</code> &amp; <code>arm64</code> (Pi 4/5, SBCs)</td>
+              <td><code>.tar.gz</code></td>
+              <td><code>~/.local/share/openhazard/baseEF/</code></td>
+            </tr>
+            <tr>
+              <td>macOS</td>
+              <td><code>arm64</code> (Apple Silicon) &amp; <code>x86_64</code></td>
+              <td><code>.tar.gz</code> (bundles SDL2 + MoltenVK)</td>
+              <td><code>~/Library/Application Support/OpenHazard/baseEF/</code></td>
+            </tr>
+            <tr>
+              <td>Windows</td>
+              <td><code>x86_64</code> &amp; <code>arm64</code></td>
+              <td><code>.zip</code> (bundles SDL2.dll)</td>
+              <td><code>%APPDATA%\OpenHazard\baseEF\</code> or portable <code>baseEF\</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="build">
+      <h2>Build &amp; Quickstart (Linux / macOS)</h2>
+      <p class="section-lead">Build from source in four commands and import your GOG installer automatically.</p>
+      <pre><code>git clone https://github.com/GamingTux/OpenHazard.git
+cd OpenHazard
+
+# 1. Build minimal static LGPLv2.1+ Bink-only FFmpeg
+./cmake/build-bink-ffmpeg.sh
+
+# 2. Configure, compile (Release + LTO), and package
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j"$(nproc)"
+cpack --config build/CPackConfig.cmake -B build
+
+# 3. Import retail game data (GOG .exe or BaseEF folder)
+./packaging/openhazard-import-data.sh /path/to/setup_star_trek_voyagertm_elite_force_1.2.exe
+
+# 4. Play!
+./packaging/openhazard.sh       # Singleplayer (Vulkan)
+./packaging/openhazard-mp.sh    # Holomatch Multiplayer (Vulkan)
+./packaging/openhazard-ded.sh   # Dedicated Server</code></pre>
+    </section>
+  </main>
+
+  <footer>
+    <div class="container footer-inner">
+      <div>
+        <strong>OpenHazard</strong> — Engine &amp; Renderer licensed under
+        <a href="https://github.com/GamingTux/OpenHazard/blob/main/LICENSE">GPLv2</a>;
+        SP game module under the Raven Software STEF Game Source License.
+      </div>
+      <div>
+        <a href="https://github.com/GamingTux/OpenHazard">GitHub Repository</a> ·
+        <a href="https://github.com/GamingTux/OpenHazard/blob/main/CREDITS.md">Credits &amp; Licenses</a>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

@@ -1,0 +1,9 @@
+build/
+build-asan/
+third_party/ffmpeg-bink/
+*.deb
+*.log
+*.tmp
+*~
+.vscode/
+.idea/

@@ -1,0 +1,10 @@
+EFGAME_1.0 {
+  global:
+    OH_GetGameAPI;
+    OH_dllEntry;
+    OH_vmMain;
+    _Z10GetGameAPIP13game_import_t;
+    _Z6vmMainiiiiiiiii;
+    _Z8dllEntryPFiizE;
+  local: *;
+};

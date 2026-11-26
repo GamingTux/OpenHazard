@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=OpenHazard Holomatch (Multiplayer)
+GenericName=Star Trek: Voyager - Elite Force Holomatch
+Comment=Native Linux Vulkan Multiplayer port of Star Trek: Voyager - Elite Force
+Exec=openhazard-mp
+Terminal=false
+Categories=Game;ActionGame;
+Keywords=OpenHazard;Holomatch;Multiplayer;Star Trek;Voyager;Elite Force;FPS;

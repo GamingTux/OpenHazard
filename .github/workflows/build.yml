@@ -1,0 +1,207 @@
+name: Build Portable Packages
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    name: Linux (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config libsdl2-dev libcurl4-openssl-dev curl xz-utils
+
+      - name: Cache static Bink FFmpeg
+        id: cache-ffmpeg
+        uses: actions/cache@v4
+        with:
+          path: third_party/ffmpeg-bink
+          key: ffmpeg-bink-7.1.1-linux-${{ matrix.arch }}-v1
+
+      - name: Build minimal static Bink FFmpeg
+        if: steps.cache-ffmpeg.outputs.cache-hit != 'true'
+        run: ./cmake/build-bink-ffmpeg.sh
+
+      - name: Configure & Build OpenHazard
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DEF_ENABLE_BINK=ON \
+            -DEF_ARM64_PORTABLE=ON
+          cmake --build build -j"$(nproc)"
+
+      - name: Package portable archive (.tar.gz)
+        run: |
+          cd build
+          cpack -G TGZ
+          ls -lh OpenHazard-*.tar.gz
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenHazard-linux-${{ matrix.arch }}
+          path: build/OpenHazard-*.tar.gz
+
+  build-macos:
+    name: macOS (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-14
+          - arch: x86_64
+            runner: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: brew install cmake ninja sdl2 molten-vk vulkan-loader
+
+      - name: Cache static Bink FFmpeg
+        id: cache-ffmpeg
+        uses: actions/cache@v4
+        with:
+          path: third_party/ffmpeg-bink
+          key: ffmpeg-bink-7.1.1-macos-${{ matrix.arch }}-v1
+
+      - name: Build minimal static Bink FFmpeg
+        if: steps.cache-ffmpeg.outputs.cache-hit != 'true'
+        run: ./cmake/build-bink-ffmpeg.sh
+
+      - name: Configure & Build OpenHazard
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 \
+            -DEF_ENABLE_BINK=ON
+          cmake --build build -j"$(sysctl -n hw.ncpu)"
+
+      - name: Bundle SDL2 & MoltenVK dylibs + Package (.tar.gz)
+        run: |
+          BREW_PREFIX="$(brew --prefix)"
+          STAGE="build/pkg/OpenHazard-1.0.0-macos-${{ matrix.arch }}"
+          mkdir -p "${STAGE}"
+          cmake --install build --prefix "${STAGE}"
+          cp -L "${BREW_PREFIX}/lib/libSDL2-2.0.0.dylib" "${STAGE}/"
+          cp -L "${BREW_PREFIX}/lib/libvulkan.1.dylib" "${STAGE}/" || true
+          cp -L "${BREW_PREFIX}/lib/libMoltenVK.dylib" "${STAGE}/" || true
+          for bin in "${STAGE}/openhazard-sp" "${STAGE}/openhazard-mp"; do
+            SDL_DEP="$(otool -L "${bin}" | awk '/libSDL2/{print $1; exit}')"
+            if [[ -n "${SDL_DEP}" ]]; then
+              install_name_tool -change "${SDL_DEP}" "@loader_path/libSDL2-2.0.0.dylib" "${bin}"
+            fi
+          done
+          tar -czf "build/OpenHazard-1.0.0-macos-${{ matrix.arch }}.tar.gz" -C build/pkg "OpenHazard-1.0.0-macos-${{ matrix.arch }}"
+          ls -lh build/OpenHazard-*.tar.gz
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenHazard-macos-${{ matrix.arch }}
+          path: build/OpenHazard-*.tar.gz
+
+  build-windows:
+    name: Windows (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: windows-2022
+            vs_arch: x64
+            sdl_dir: x64
+          - arch: arm64
+            runner: windows-2022
+            vs_arch: ARM64
+            sdl_dir: arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Obtain SDL2 for MSVC (${{ matrix.vs_arch }})
+        shell: pwsh
+        run: |
+          $ver = "2.32.4"
+          if ("${{ matrix.vs_arch }}" -eq "x64") {
+            $url = "https://github.com/libsdl-org/SDL/releases/download/release-$ver/SDL2-devel-$ver-VC.zip"
+            Invoke-WebRequest -Uri $url -OutFile "$env:RUNNER_TEMP\sdl2.zip"
+            Expand-Archive -Path "$env:RUNNER_TEMP\sdl2.zip" -DestinationPath "$env:RUNNER_TEMP\sdl2" -Force
+            echo "SDL2_CMAKE_DIR=$env:RUNNER_TEMP\sdl2\SDL2-$ver\cmake" >> $env:GITHUB_ENV
+            echo "SDL2_DLL_PATH=$env:RUNNER_TEMP\sdl2\SDL2-$ver\lib\x64\SDL2.dll" >> $env:GITHUB_ENV
+          } else {
+            $url = "https://github.com/libsdl-org/SDL/releases/download/release-$ver/SDL2-$ver.zip"
+            Invoke-WebRequest -Uri $url -OutFile "$env:RUNNER_TEMP\sdl2-src.zip"
+            Expand-Archive -Path "$env:RUNNER_TEMP\sdl2-src.zip" -DestinationPath "$env:RUNNER_TEMP\sdl2-src" -Force
+            cmake -S "$env:RUNNER_TEMP\sdl2-src\SDL2-$ver" -B "$env:RUNNER_TEMP\sdl2-build" `
+              -G "Visual Studio 17 2022" -A ARM64 `
+              -DSDL_TEST=OFF -DSDL_STATIC=OFF -DSDL_SHARED=ON `
+              -DCMAKE_INSTALL_PREFIX="$env:RUNNER_TEMP\sdl2-arm64"
+            cmake --build "$env:RUNNER_TEMP\sdl2-build" --config Release --target INSTALL --parallel
+            echo "SDL2_CMAKE_DIR=$env:RUNNER_TEMP\sdl2-arm64\cmake" >> $env:GITHUB_ENV
+            echo "SDL2_DLL_PATH=$env:RUNNER_TEMP\sdl2-arm64\bin\SDL2.dll" >> $env:GITHUB_ENV
+          }
+
+      - name: Configure & Build OpenHazard (MSVC ${{ matrix.vs_arch }})
+        shell: pwsh
+        run: |
+          cmake -S . -B build -G "Visual Studio 17 2022" -A ${{ matrix.vs_arch }} `
+            -DSDL2_DIR="$env:SDL2_CMAKE_DIR" `
+            -DEF_ENABLE_BINK=OFF
+          cmake --build build --config Release --parallel
+
+      - name: Stage SDL2.dll & Package portable archive (.zip)
+        shell: pwsh
+        run: |
+          $stage = "build\pkg\OpenHazard-1.0.0-windows-${{ matrix.arch }}"
+          cmake --install build --config Release --prefix $stage
+          if (Test-Path "$env:SDL2_DLL_PATH") {
+            Copy-Item "$env:SDL2_DLL_PATH" "$stage\SDL2.dll" -Force
+          }
+          Compress-Archive -Path $stage -DestinationPath "build\OpenHazard-1.0.0-windows-${{ matrix.arch }}.zip" -CompressionLevel Optimal
+          Get-ChildItem build\OpenHazard-*.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenHazard-windows-${{ matrix.arch }}
+          path: build/OpenHazard-*.zip
+
+  release:
+    name: Publish GitHub Release
+    needs: [ build-linux, build-macos, build-windows ]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create Release with all 6 portable archives
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/OpenHazard-*.tar.gz
+            dist/OpenHazard-*.zip
