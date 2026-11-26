@@ -70,7 +70,7 @@ jobs:
       matrix:
         include:
           - arch: arm64
-            runner: macos-14
+            runner: macos-15
           - arch: x86_64
             runner: macos-15-intel
     steps:
@@ -156,7 +156,8 @@ jobs:
             Expand-Archive -Path "$env:RUNNER_TEMP\sdl2-src.zip" -DestinationPath "$env:RUNNER_TEMP\sdl2-src" -Force
             cmake -S "$env:RUNNER_TEMP\sdl2-src\SDL2-$ver" -B "$env:RUNNER_TEMP\sdl2-build" `
               -G "Visual Studio 17 2022" -A ARM64 `
-              -DSDL_TEST=OFF -DSDL_STATIC=OFF -DSDL_SHARED=ON `
+              -DSDL_TEST=OFF -DSDL_STATIC=OFF -DSDL_SHARED=ON -DSDL_LIBC=ON `
+              -DCMAKE_C_FLAGS="/forceInterlockedFunctions-" `
               -DCMAKE_INSTALL_PREFIX="$env:RUNNER_TEMP\sdl2-arm64"
             cmake --build "$env:RUNNER_TEMP\sdl2-build" --config Release --target INSTALL --parallel
             echo "SDL2_CMAKE_DIR=$env:RUNNER_TEMP\sdl2-arm64\cmake" >> $env:GITHUB_ENV

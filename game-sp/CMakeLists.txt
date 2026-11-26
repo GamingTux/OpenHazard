@@ -11,7 +11,6 @@ set(SRC    "${CMAKE_CURRENT_SOURCE_DIR}/src")
 set(COMPAT "${CMAKE_CURRENT_SOURCE_DIR}/compat")
 
 set(EF_INCLUDES
-  "${COMPAT}"
   "${SRC}/game"
   "${SRC}/cgame"
   "${SRC}/ui"
@@ -23,6 +22,9 @@ set(EF_INCLUDES
   "${SRC}/speedrun/strafe_helper"
   "${SRC}/speedrun/overbounce_prediction"
 )
+if(NOT WIN32)
+  list(PREPEND EF_INCLUDES "${COMPAT}")
+endif()
 
 if(MSVC)
   set(EF_COPTS /W0 /Zc:strictStrings-)
@@ -87,8 +89,10 @@ elseif(UNIX)
   target_link_libraries(efgame PRIVATE m)
 elseif(MSVC)
   target_link_options(efgame PRIVATE /FORCE:UNRESOLVED)
+  target_link_libraries(efgame PRIVATE winmm)
 elseif(MINGW)
   target_link_options(efgame PRIVATE -Wl,--unresolved-symbols=ignore-all)
+  target_link_libraries(efgame PRIVATE winmm)
 endif()
 
 # ===================== efui (ui) =====================

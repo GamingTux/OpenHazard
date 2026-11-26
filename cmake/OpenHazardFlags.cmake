@@ -20,11 +20,13 @@ endif()
 
 function(ef_apply_common_flags target)
   if(MSVC)
+    target_compile_definitions(${target} PRIVATE
+      _CRT_SECURE_NO_WARNINGS
+      _CRT_NONSTDC_NO_DEPRECATE
+    )
     target_compile_options(${target} PRIVATE
-      /MP
-      /D_CRT_SECURE_NO_WARNINGS
-      /D_CRT_NONSTDC_NO_DEPRECATE
-      $<$<CONFIG:Release>:/O2>
+      $<$<COMPILE_LANGUAGE:C,CXX>:/MP>
+      $<$<AND:$<COMPILE_LANGUAGE:C,CXX>,$<CONFIG:Release>>:/O2>
     )
   else()
     # CRITICAL on ARM64: plain `char` is unsigned by default on aarch64, whereas

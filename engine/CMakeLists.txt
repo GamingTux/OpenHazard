@@ -182,6 +182,11 @@ endif()
 if(EF_IS_X86_64 AND NOT MSVC)
   list(APPEND SYS_SRC ${EF}/asm/ftola.c ${EF}/asm/snapvector.c)
 elseif(EF_IS_X86_64 AND MSVC AND CMAKE_ASM_MASM_COMPILER)
+  set_source_files_properties(
+    ${EF}/asm/ftola.asm
+    ${EF}/asm/snapvector.asm
+    PROPERTIES COMPILE_DEFINITIONS "idx64"
+  )
   list(APPEND SYS_SRC ${EF}/asm/ftola.asm ${EF}/asm/snapvector.asm)
 endif()
 
@@ -229,7 +234,6 @@ if(BUILD_SP)
     ${SP}/sp_clink.c
   )
   target_include_directories(sp_game_bridge PRIVATE
-    "${EFG}/compat"
     "${EFG}/src/game"
     "${EFG}/src/cgame"
     "${EFG}/src/ui"
@@ -238,6 +242,9 @@ if(BUILD_SP)
     "${EFG}/src/qcommon"
     "${SP}"
   )
+  if(NOT WIN32)
+    target_include_directories(sp_game_bridge BEFORE PRIVATE "${EFG}/compat")
+  endif()
   if(MSVC)
     target_compile_options(sp_game_bridge PRIVATE /W0 /Zc:strictStrings-)
   else()
