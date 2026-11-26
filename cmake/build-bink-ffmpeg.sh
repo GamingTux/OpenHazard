@@ -77,7 +77,7 @@ echo "==> Configuring minimal Bink-only static FFmpeg -> ${PREFIX}"
   --enable-demuxer=bink \
   --enable-decoder=bink,binkaudio_dct,binkaudio_rdft \
   --enable-swscale \
-  "${EXTRA_CFG[@]}" \
+  ${EXTRA_CFG[@]+"${EXTRA_CFG[@]}"} \
   --extra-cflags="${EXTRA_CFLAGS}"
 
 echo "==> Compiling on ${JOBS} cores..."

@@ -25,6 +25,7 @@ function(ef_apply_common_flags target)
       _CRT_NONSTDC_NO_DEPRECATE
     )
     target_compile_options(${target} PRIVATE
+      $<$<COMPILE_LANGUAGE:C>:/std:c11>
       $<$<COMPILE_LANGUAGE:C,CXX>:/MP>
       $<$<AND:$<COMPILE_LANGUAGE:C,CXX>,$<CONFIG:Release>>:/O2>
     )

@@ -273,9 +273,9 @@ void vk_queue_wait_idle( void );
 // Mali/PowerVR device-loss recovery: set when any GPU-sync point sees
 // VK_ERROR_DEVICE_LOST; the client frame loop polls it to drive a device
 // recreate + level reload. Cleared once a fresh device is initialized.
-qboolean vk_device_lost( void );
-void vk_clear_device_lost( void );
-int vk_device_lost_report( char *out, int outSize ); // fill a GPU/memory diagnostic snapshot (call before device teardown)
+Q_EXPORT qboolean vk_device_lost( void );
+Q_EXPORT void vk_clear_device_lost( void );
+Q_EXPORT int vk_device_lost_report( char *out, int outSize ); // fill a GPU/memory diagnostic snapshot (call before device teardown)
 void vk_reset_registration_stats( void );            // zero the per-map upload accounting (RE_BeginRegistration)
 int  vk_registration_report( char *out, int outSize ); // format the per-map upload/clamp summary line
 
