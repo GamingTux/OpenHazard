@@ -96,7 +96,7 @@ Set FPU control word to default value
 #define FPUCWMASK1 (_MCW_RC | _MCW_EM)
 #define FPUCW (_RC_NEAR | _MCW_EM | _PC_53)
 
-#if idx64
+#if idx64 || defined(_M_ARM64) || defined(__aarch64__)
 #define FPUCWMASK	(FPUCWMASK1)
 #else
 #define FPUCWMASK	(FPUCWMASK1 | _MCW_PC)

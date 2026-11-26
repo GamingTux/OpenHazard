@@ -79,8 +79,10 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #if defined(_WIN64) || defined(__WIN64__)
 
+#if !defined(_M_ARM64) && !defined(__aarch64__)
 #undef idx64
 #define idx64 1
+#endif
 
 #undef QDECL
 #define QDECL __cdecl
