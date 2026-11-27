@@ -147,6 +147,7 @@ static cinematics_t		cin;
 static cin_cache		cinTable[MAX_VIDEO_HANDLES];
 static int				currentHandle = -1;
 static int				CL_handle = -1;
+static cvar_t			*cl_cinematicAspect = NULL;
 
 extern int				s_soundtime;		// sample PAIRS
 
@@ -1779,6 +1780,15 @@ static void CIN_DrawFadeOverlay( int handle ) {
 	if ( black[3] <= 0.0f ) {
 		return;
 	}
+	if ( cinTable[handle].module == CIN_CLIENT &&
+	     cinTable[handle].xpos == 0 && cinTable[handle].ypos == 0 &&
+	     cinTable[handle].width == SCREEN_WIDTH && cinTable[handle].height == SCREEN_HEIGHT ) {
+		re.SetColor( black );
+		re.DrawStretchPic( 0.0f, 0.0f, (float)cls.glconfig.vidWidth, (float)cls.glconfig.vidHeight,
+						   0.0f, 0.0f, 0.0f, 0.0f, cls.whiteShader );
+		re.SetColor( NULL );
+		return;
+	}
 	SCR_FillRect( (float)cinTable[handle].xpos, (float)cinTable[handle].ypos,
 				  (float)cinTable[handle].width, (float)cinTable[handle].height, black );
 }
@@ -1791,11 +1801,21 @@ CIN_DrawCinematic
 void CIN_DrawCinematic (int handle) {
 	float	x, y, w, h;
 	byte	*buf;
+	qboolean isFullscreenClient;
 
 	if (handle < 0 || handle>= MAX_VIDEO_HANDLES || cinTable[handle].status == FMV_EOF) return;
 
 	if (!cinTable[handle].buf) {
 		return;
+	}
+
+	if ( !cl_cinematicAspect ) {
+		// Fullscreen 4:3 FMV scaling on widescreen displays:
+		// 0 = 4:3 pillarbox (black sidebars)
+		// 1 = hybrid zoom + stretch (default: ~15% stretch + ~6.7% top/bottom crop on 16:9, no bars)
+		// 2 = crop-to-fill (preserve exact 4:3 aspect, crop top/bottom)
+		// 3 = stretch-to-fill (no crop, full horizontal stretch)
+		cl_cinematicAspect = Cvar_Get( "cl_cinematicAspect", "1", CVAR_ARCHIVE );
 	}
 
 	x = cinTable[handle].xpos;
@@ -1804,6 +1824,50 @@ void CIN_DrawCinematic (int handle) {
 	h = cinTable[handle].height;
 	buf = cinTable[handle].buf;
 
+	isFullscreenClient = ( cinTable[handle].module == CIN_CLIENT &&
+	                       cinTable[handle].xpos == 0 && cinTable[handle].ypos == 0 &&
+	                       cinTable[handle].width == SCREEN_WIDTH && cinTable[handle].height == SCREEN_HEIGHT )
+	                     ? qtrue : qfalse;
+
+	if ( isFullscreenClient && cl_cinematicAspect && cl_cinematicAspect->integer > 0 &&
+	     cls.glconfig.vidWidth > 0 && cls.glconfig.vidHeight > 0 ) {
+		const float vidW = (float)cls.glconfig.vidWidth;
+		const float vidH = (float)cls.glconfig.vidHeight;
+		const float srcAspect = (float)SCREEN_WIDTH / (float)SCREEN_HEIGHT; // 4:3
+		const float screenAspect = vidW / vidH;
+		const float ratio = screenAspect / srcAspect;
+		const int mode = cl_cinematicAspect->integer;
+
+		if ( ratio > 1.001f ) {
+			if ( mode == 1 ) {
+				// Hybrid: split aspect mismatch symmetrically between gentle horizontal stretch
+				// (sqrt(ratio)) and gentle vertical crop (sqrt(ratio)).
+				const float scale = sqrtf( ratio );
+				x = 0.0f;
+				w = vidW;
+				h = ceilf( vidH * scale );
+				y = floorf( ( vidH - h ) * 0.5f );
+			} else if ( mode == 2 ) {
+				// Crop-to-fill: preserve 4:3 aspect, crop top and bottom.
+				x = 0.0f;
+				w = vidW;
+				h = ceilf( vidW / srcAspect );
+				y = floorf( ( vidH - h ) * 0.5f );
+			} else {
+				// Stretch-to-fill (mode >= 3).
+				x = 0.0f;
+				y = 0.0f;
+				w = vidW;
+				h = vidH;
+			}
+		} else {
+			// 4:3 or taller display: fill naturally without distortion.
+			x = 0.0f;
+			y = 0.0f;
+			w = vidW;
+			h = vidH;
+		}
+	} else
 #ifdef USE_FLEXIBLE_DISPLAY
 	if ( cl_flexibleDisplay->integer ) {
 		switch ( cinTable[handle].module ) {
