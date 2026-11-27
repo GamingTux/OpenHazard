@@ -988,6 +988,42 @@ static void G_ApplyMissionSpawnVarFixes( void ) {
 			i--;
 			continue;
 		}
+
+		// 6. scav3b: 1 of 14 locked-door buzzer triggers has typo target="baddoor1" instead of "baddoor".
+		if ( !Q_stricmp( classname, "trigger_multiple" ) &&
+		     !Q_stricmp( key, "target" ) && !Q_stricmp( val, "baddoor1" ) ) {
+			spawnVars[i][1] = G_NewString( "baddoor" );
+			continue;
+		}
+
+		// 7. tour/deck04: 1 of 15 access-denied buzzer triggers has typo target="negative36" instead of "negative37".
+		if ( !Q_stricmp( classname, "trigger_multiple" ) &&
+		     !Q_stricmp( key, "target" ) && !Q_stricmp( val, "negative36" ) ) {
+			spawnVars[i][1] = G_NewString( "negative37" );
+			continue;
+		}
+
+		// 8. stasis3: battle_teleporter_powersource has typo paintarget="battle_controlroom_spawn1"
+		//    instead of "battle_controlroom_spawn" (control-room defender relays).
+		if ( !Q_stricmp( classname, "misc_model_breakable" ) &&
+		     !Q_stricmp( key, "paintarget" ) && !Q_stricmp( val, "battle_controlroom_spawn1" ) ) {
+			spawnVars[i][1] = G_NewString( "battle_controlroom_spawn" );
+			continue;
+		}
+
+		// 9. scav2: trigger_multiple targets "spawnneckklingons" instead of NPC_klingon "neckklingons".
+		if ( !Q_stricmp( classname, "trigger_multiple" ) &&
+		     !Q_stricmp( key, "target" ) && !Q_stricmp( val, "spawnneckklingons" ) ) {
+			spawnVars[i][1] = G_NewString( "neckklingons" );
+			continue;
+		}
+
+		// 10. dn1: breakable vent grate targets "parasite_vent1" instead of "parasite_vent2".
+		if ( !Q_stricmp( classname, "func_breakable" ) &&
+		     !Q_stricmp( key, "target" ) && !Q_stricmp( val, "parasite_vent1" ) ) {
+			spawnVars[i][1] = G_NewString( "parasite_vent2" );
+			continue;
+		}
 	}
 }
 
