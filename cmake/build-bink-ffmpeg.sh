@@ -30,7 +30,7 @@ else
   JOBS=4
 fi
 
-EXTRA_CFLAGS="-O2 -fPIC"
+EXTRA_CFLAGS="-O3 -fno-math-errno -fno-trapping-math -ffp-contract=fast -fPIC"
 EXTRA_CFG=()
 if [[ "${OS_NAME}" == "Linux" ]]; then
   if [[ "${ARCH_NAME}" == "aarch64" || "${ARCH_NAME}" == "arm64" ]]; then

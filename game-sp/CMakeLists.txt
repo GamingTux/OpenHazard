@@ -75,6 +75,7 @@ target_include_directories(efgame PRIVATE ${EF_INCLUDES})
 target_compile_options(efgame PRIVATE ${EF_COPTS})
 target_compile_definitions(efgame PRIVATE NDEBUG)
 ef_apply_common_flags(efgame)
+ef_apply_lto(efgame)
 
 if(APPLE)
   target_link_options(efgame PRIVATE
@@ -110,6 +111,7 @@ target_include_directories(efui PRIVATE ${EF_INCLUDES})
 target_compile_options(efui PRIVATE ${EF_COPTS})
 target_compile_definitions(efui PRIVATE NDEBUG _USRDLL UI_EXPORTS)
 ef_apply_common_flags(efui)
+ef_apply_lto(efui)
 
 if(APPLE)
   target_link_options(efui PRIVATE

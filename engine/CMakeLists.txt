@@ -72,12 +72,14 @@ add_library(ef_zlib_obj OBJECT ${ZLIB_SRC})
 set_target_properties(ef_zlib_obj PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(ef_zlib_obj PRIVATE "${EF}/zlib")
 ef_apply_common_flags(ef_zlib_obj)
+ef_apply_lto(ef_zlib_obj)
 
 file(GLOB JPEG_SRC "${EF}/jpeg-8c/*.c")
 add_library(ef_jpeg_obj OBJECT ${JPEG_SRC})
 set_target_properties(ef_jpeg_obj PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(ef_jpeg_obj PRIVATE "${EF}/jpeg-8c")
 ef_apply_common_flags(ef_jpeg_obj)
+ef_apply_lto(ef_jpeg_obj)
 
 set(LIBMAD_SRC
   ${EF}/libmad-0.15.1b/bit.c     ${EF}/libmad-0.15.1b/decoder.c
@@ -98,6 +100,7 @@ target_compile_definitions(ef_libmad_obj PRIVATE
   ARCH_STRING="${EF_ARCH_STRING}"
 )
 ef_apply_common_flags(ef_libmad_obj)
+ef_apply_lto(ef_libmad_obj)
 
 file(GLOB BOTLIB_SRC "${EF}/botlib/*.c")
 add_library(ef_botlib_obj OBJECT ${BOTLIB_SRC})
@@ -110,6 +113,7 @@ target_compile_definitions(ef_botlib_obj PRIVATE
   ARCH_STRING="${EF_ARCH_STRING}"
 )
 ef_apply_common_flags(ef_botlib_obj)
+ef_apply_lto(ef_botlib_obj)
 
 # ---- Engine core sources ----
 set(CLIENT_SRC
@@ -257,6 +261,7 @@ if(BUILD_SP)
   endif()
   target_compile_definitions(sp_game_bridge PRIVATE NDEBUG)
   ef_apply_common_flags(sp_game_bridge)
+  ef_apply_lto(sp_game_bridge)
 endif()
 
 # ---- Shared engine compile setup helper for SP & Holomatch MP clients ----
@@ -303,7 +308,6 @@ function(ef_configure_client_target target with_bink)
   )
   if(NOT MSVC)
     target_compile_options(${target} PRIVATE
-      -fvisibility=hidden
       -Werror=implicit-function-declaration
     )
   endif()
@@ -402,7 +406,6 @@ if(BUILD_MP)
   )
   if(NOT MSVC)
     target_compile_options(openhazard-ded PRIVATE
-      -fvisibility=hidden
       -Werror=implicit-function-declaration
     )
   endif()
@@ -439,7 +442,6 @@ if(NOT EF_STATIC_RENDERER)
   )
   if(NOT MSVC)
     target_compile_options(renderer_vulkan PRIVATE
-      -fvisibility=hidden
       -Werror=implicit-function-declaration
     )
   endif()
