@@ -2464,6 +2464,15 @@ static void Q3_SetEnemy( int entID, const char *name )
 
 	if( !Q_stricmp("NONE", name) || !Q_stricmp("NULL", name))
 	{
+		// Cut-content restoration (voy4/recon.ibi): restore FL_NOTARGET on deadguy once
+		// Biessman clears his enemy after shooting the corpse.
+		if ( g_restoreCutContent && g_restoreCutContent->integer &&
+		     !Q_stricmp( level.mapname, "voy4" ) &&
+		     ent->enemy && ent->enemy->targetname && !Q_stricmp( ent->enemy->targetname, "deadguy" ) )
+		{
+			ent->enemy->flags |= FL_NOTARGET;
+		}
+
 		if(ent->NPC)
 		{
 			G_ClearEnemy(ent);
@@ -2489,6 +2498,16 @@ static void Q3_SetEnemy( int entID, const char *name )
 		}*/
 		else
 		{
+			// Cut-content restoration (voy4/recon.ibi): voy4/deadguy.ibi sets FL_NOTARGET
+			// so allies ignore the corpse during combat, and voy4/recon forgot to clear it
+			// before Biessman's SET_ENEMY "deadguy" / BS_POINT_AND_SHOOT, causing G_SetEnemy
+			// to silently reject the target.
+			if ( g_restoreCutContent && g_restoreCutContent->integer &&
+			     !Q_stricmp( level.mapname, "voy4" ) && !Q_stricmp( name, "deadguy" ) )
+			{
+				enemy->flags &= ~FL_NOTARGET;
+			}
+
 			if(ent->NPC)
 			{
 				G_SetEnemy( ent, enemy );

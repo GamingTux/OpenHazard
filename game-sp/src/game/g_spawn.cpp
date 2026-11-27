@@ -952,8 +952,9 @@ static void G_ApplyMissionSpawnVarFixes( void ) {
 	// Cut-content restoration (voy4):
 	// - Route Cargo Bay 2 clear counter (counter2) through restored voy4/recon.ibi
 	//   (Biessman "Just making sure!" scene) before advancing to t1368 (voy4/victory.ibi).
-	// - Nudge Tuvok 52 units west behind the same cover so he does not body-block
-	//   Biessman's waypoint exit (476,-1832 -> 448,-1928).
+	// - Shift Tuvok east-southeast onto open floor (496 -1904 544) so he does not body-block
+	//   Biessman's waypoint exit (476,-1832 -> 448,-1928) while keeping his own path to
+	//   tuvok_nav1 (298,-1918) in voy4/victory.ibi completely unobstructed.
 	// - Widen deadguyarea from waypoint_navgoal_4 (radius 4) to waypoint_navgoal (radius 16)
 	//   so Biessman reliably completes gotodeadguy beside the corpse bounding box.
 	if ( doCut && !Q_stricmp( level.mapname, "voy4" ) ) {
@@ -967,7 +968,7 @@ static void G_ApplyMissionSpawnVarFixes( void ) {
 		} else if ( !Q_stricmp( classname, "NPC_Tuvok" ) ) {
 			for ( i = 0; i < numSpawnVars; i++ ) {
 				if ( !Q_stricmp( spawnVars[i][0], "origin" ) && !Q_stricmp( spawnVars[i][1], "448 -1880 544" ) ) {
-					spawnVars[i][1] = G_NewString( "396 -1880 544" );
+					spawnVars[i][1] = G_NewString( "496 -1904 544" );
 				}
 			}
 		} else if ( !Q_stricmp( classname, "waypoint_navgoal_4" ) &&
