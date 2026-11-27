@@ -1024,9 +1024,12 @@ void SCR_DrawScreenField( stereoFrame_t stereoFrame ) {
 			CL_CGameRendering(stereoFrame);
 			// EF1 SP 1:1: an in-game cinematic (inGameCinematic / CIN_inGame) stays CA_ACTIVE
 			// and overlays the FMV on the live (paused) game — the retail engine
-			// never enters CA_CINEMATIC for it. The world was just drawn (frozen, since the
-			// SP bridge holds the sim while cl_paused); draw the video stretched over it.
+			// never enters CA_CINEMATIC for it. Clear the entire viewport to cinema black first
+			// so the frozen 3D world and HUD never bleed into 16:9 pillarbox borders around 4:3 FMVs.
 			if ( CL_InGameCinematicActive() ) {
+				re.SetColor( g_color_table[0] );
+				re.DrawStretchPic( 0, 0, cls.glconfig.vidWidth, cls.glconfig.vidHeight, 0, 0, 0, 0, cls.whiteShader );
+				re.SetColor( NULL );
 				SCR_DrawCinematic();
 			}
 #ifdef USE_FLEXIBLE_DISPLAY
