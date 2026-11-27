@@ -103,6 +103,7 @@ cvar_t	*r_tonemap;
 cvar_t	*r_sharpen;
 cvar_t	*r_ssao;
 cvar_t	*r_ssao_intensity;
+cvar_t	*r_ohClassic;
 cvar_t	*r_renderWidth;
 cvar_t	*r_renderHeight;
 cvar_t	*r_renderScale;
@@ -1958,6 +1959,9 @@ static void R_Register( void )
 	r_ssao_intensity = ri.Cvar_Get( "r_ssao_intensity", "0.75", CVAR_ARCHIVE_ND );
 	ri.Cvar_CheckRange( r_ssao_intensity, "0.1", "1.5", CV_FLOAT );
 	ri.Cvar_SetDescription( r_ssao_intensity, "Strength of Screen-Space Ambient Occlusion darkening (requires \\r_ssao 1)." );
+	r_ohClassic = ri.Cvar_Get( "r_ohClassic", "0", CVAR_TEMP );
+	ri.Cvar_CheckRange( r_ohClassic, "0", "1", CV_INTEGER );
+	ri.Cvar_SetDescription( r_ohClassic, "Live A/B bypass toggled by oh_toggle (F8): 1 temporarily disables OpenHazard post-processing (Bloom/SSAO/Tonemap/CAS)." );
 
 	r_ext_multisample = ri.Cvar_Get( "r_ext_multisample", "4", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_ext_multisample, "0", "64", CV_INTEGER );

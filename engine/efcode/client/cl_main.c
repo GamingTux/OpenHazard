@@ -2062,6 +2062,61 @@ we also have to reload the UI and CGame because the renderer
 doesn't know what graphics to reload
 =================
 */
+/*
+==================
+CL_OpenHazardToggle_f
+
+Live A/B hotkey (default F8): instantly toggles all OpenHazard visual &
+widescreen enhancements on/off in-game (0 ms, no vid_restart needed during
+active SP gameplay) while preserving the user's exact settings.
+==================
+*/
+static struct {
+	qboolean	classicActive;
+	char		dlightMode[16];
+	char		dlightScale[16];
+	char		flares[16];
+	char		lodbias[16];
+	char		fovAspect[16];
+} oh_toggle_state;
+
+static void CL_OpenHazardRestoreLive( void ) {
+	if ( !oh_toggle_state.classicActive ) {
+		return;
+	}
+	Cvar_Set( "r_ohClassic", "0" );
+	if ( oh_toggle_state.dlightMode[0] )  Cvar_Set( "r_dlightMode", oh_toggle_state.dlightMode );
+	if ( oh_toggle_state.dlightScale[0] ) Cvar_Set( "r_dlightScale", oh_toggle_state.dlightScale );
+	if ( oh_toggle_state.flares[0] )      Cvar_Set( "r_flares", oh_toggle_state.flares );
+	if ( oh_toggle_state.lodbias[0] )     Cvar_Set( "r_lodbias", oh_toggle_state.lodbias );
+	if ( oh_toggle_state.fovAspect[0] )   Cvar_Set( "cg_fovAspectAdjust", oh_toggle_state.fovAspect );
+	oh_toggle_state.classicActive = qfalse;
+}
+
+static void CL_OpenHazardToggle_f( void ) {
+	if ( !oh_toggle_state.classicActive ) {
+		// Snapshot current live values before switching to Classic 2000 preview
+		Q_strncpyz( oh_toggle_state.dlightMode,  Cvar_VariableString( "r_dlightMode" ),       sizeof( oh_toggle_state.dlightMode ) );
+		Q_strncpyz( oh_toggle_state.dlightScale, Cvar_VariableString( "r_dlightScale" ),      sizeof( oh_toggle_state.dlightScale ) );
+		Q_strncpyz( oh_toggle_state.flares,      Cvar_VariableString( "r_flares" ),           sizeof( oh_toggle_state.flares ) );
+		Q_strncpyz( oh_toggle_state.lodbias,     Cvar_VariableString( "r_lodbias" ),          sizeof( oh_toggle_state.lodbias ) );
+		Q_strncpyz( oh_toggle_state.fovAspect,   Cvar_VariableString( "cg_fovAspectAdjust" ), sizeof( oh_toggle_state.fovAspect ) );
+
+		Cvar_Set( "r_ohClassic", "1" );
+		Cvar_Set( "r_dlightMode", "0" );
+		Cvar_Set( "r_dlightScale", "0.5" );
+		Cvar_Set( "r_flares", "0" );
+		Cvar_Set( "r_lodbias", "0" );
+		Cvar_Set( "cg_fovAspectAdjust", "0" );
+		oh_toggle_state.classicActive = qtrue;
+
+		Com_Printf( "^3[OpenHazard F8] ^1CLASSIC 2000 MODE ^7(Bloom/SSAO/Tonemap/CAS/Dlights/Hor+ OFF - F8 to restore)\n" );
+	} else {
+		CL_OpenHazardRestoreLive();
+		Com_Printf( "^3[OpenHazard F8] ^2ENHANCED MODE ^7(All OpenHazard FX restored)\n" );
+	}
+}
+
 void CL_Vid_Restart_f( void ) {
 
 	// EF1 SP (Route-b): the SP cgame is the dlopen'd libefgame.so, NOT the engine cgvm, so the renderer
@@ -4548,6 +4603,7 @@ void CL_Init( void ) {
 	Cmd_AddCommand ("clientinfo", CL_Clientinfo_f);
 	Cmd_AddCommand ("snd_restart", CL_Snd_Restart_f);
 	Cmd_AddCommand ("vid_restart", CL_Vid_Restart_f);
+	Cmd_AddCommand ("oh_toggle", CL_OpenHazardToggle_f);
 #ifdef USE_RENDERER_DLOPEN
 	Cmd_AddCommand ("setrenderer", CL_SetRenderer_f);	// next-launch renderer choice (Renderer row in the video menu)
 #endif
@@ -4626,6 +4682,9 @@ void CL_Shutdown(char *finalmsg, qboolean disconnect, qboolean quit)
 		return;
 	}
 	recursive = qtrue;
+
+	// Never leak temporary F8 Classic preview overrides into the saved config on exit.
+	CL_OpenHazardRestoreLive();
 
 	noGameRestart = quit;
 

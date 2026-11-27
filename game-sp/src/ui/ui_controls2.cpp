@@ -3328,8 +3328,17 @@ static void ControlsDefault_MenuDraw (void)
 
 static void Default_ResetDefaults( void )
 {
-	ui.Cmd_ExecuteText( EXEC_APPEND, "exec default.cfg\n");
-	ui.Cmd_ExecuteText( EXEC_APPEND, "cvar_restart\n");
+	ui.Cmd_ExecuteText( EXEC_APPEND, "exec default.cfg\n" );
+	// Re-apply modern FPS defaults + OpenHazard F8 toggle so "Reset Defaults"
+	// never reverts players back to year-2000 MOUSE2=+forward / SPACE=+use.
+	ui.Cmd_ExecuteText( EXEC_APPEND,
+		"bind w \"+forward\"; bind s \"+back\"; bind a \"+moveleft\"; bind d \"+moveright\"; "
+		"bind SPACE \"+moveup\"; bind CTRL \"+movedown\"; bind c \"+movedown\"; bind SHIFT \"+speed\"; "
+		"bind e \"+use\"; bind f \"+button2\"; bind q \"weapprev\"; bind r \"+zoom\"; bind v \"+button3\"; "
+		"bind MOUSE1 \"+attack\"; bind MOUSE2 \"+altattack\"; bind MOUSE3 \"+zoom\"; "
+		"bind MWHEELUP \"weapprev\"; bind MWHEELDOWN \"weapnext\"; "
+		"bind F5 \"save quik\"; bind F8 \"oh_toggle\"; bind F9 \"load quik\"\n" );
+	ui.Cmd_ExecuteText( EXEC_APPEND, "cvar_restart\n" );
 	ui.Cmd_ExecuteText( EXEC_APPEND, "vid_restart\n" );
 }
 

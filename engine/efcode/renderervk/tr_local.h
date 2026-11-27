@@ -1490,6 +1490,7 @@ extern cvar_t	*r_tonemap;
 extern cvar_t	*r_sharpen;
 extern cvar_t	*r_ssao;
 extern cvar_t	*r_ssao_intensity;
+extern cvar_t	*r_ohClassic;
 extern cvar_t	*r_ext_multisample;
 extern cvar_t	*r_ext_supersample;
 extern cvar_t	*r_ext_alpha_to_coverage;

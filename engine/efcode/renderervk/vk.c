@@ -6343,8 +6343,8 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 	frag_spec_data.bloom_threshold_mode = r_bloom_threshold_mode->integer;
 	frag_spec_data.bloom_modulate = r_bloom_modulate->integer;
 	frag_spec_data.dither = r_dither->integer;
-	frag_spec_data.tonemap = r_tonemap ? r_tonemap->integer : 0;
-	frag_spec_data.sharpen = r_sharpen ? Com_Clamp( 0.0f, 1.0f, r_sharpen->value ) : 0.0f;
+	frag_spec_data.tonemap = ( r_tonemap && !( r_ohClassic && r_ohClassic->integer ) ) ? r_tonemap->integer : 0;
+	frag_spec_data.sharpen = ( r_sharpen && !( r_ohClassic && r_ohClassic->integer ) ) ? Com_Clamp( 0.0f, 1.0f, r_sharpen->value ) : 0.0f;
 	frag_spec_data.ssao_intensity = r_ssao_intensity ? Com_Clamp( 0.1f, 1.5f, r_ssao_intensity->value ) : 0.75f;
 
 	if ( !vk_surface_format_color_depth( vk.present_format.format, &frag_spec_data.depth_r, &frag_spec_data.depth_g, &frag_spec_data.depth_b ) )
@@ -8887,7 +8887,7 @@ void vk_end_frame( void )
 	{
 		vk.cmd->last_pipeline = VK_NULL_HANDLE; // do not restore clobbered descriptors in vk_bloom()
 
-		if ( vk.bloomActive || vk.ssaoActive )
+		if ( ( vk.bloomActive || vk.ssaoActive ) && !( r_ohClassic && r_ohClassic->integer ) )
 		{
 			vk_bloom();
 		}
@@ -8914,8 +8914,8 @@ void vk_end_frame( void )
 				( tr.overbrightBits == 0 ) &&
 				( fabsf( r_greyscale->value ) < 1e-4f ) &&
 				( r_dither->integer == 0 ) &&
-				( r_tonemap->integer == 0 ) &&
-				( fabsf( r_sharpen->value ) < 1e-4f ) &&
+				( r_tonemap->integer == 0 || ( r_ohClassic && r_ohClassic->integer ) ) &&
+				( fabsf( r_sharpen->value ) < 1e-4f || ( r_ohClassic && r_ohClassic->integer ) ) &&
 				( r_renderScale->integer == 0 ) &&
 				( vk.swapchainCanTransferDst ) &&
 				( vk.color_format == vk.present_format.format ) &&
@@ -9425,7 +9425,7 @@ qboolean vk_bloom( void )
 		return qfalse;
 	}
 
-	if ( backEnd.doneBloom || !backEnd.doneSurfaces || !vk.fboActive || ( !vk.bloomActive && !vk.ssaoActive ) )
+	if ( backEnd.doneBloom || !backEnd.doneSurfaces || !vk.fboActive || ( !vk.bloomActive && !vk.ssaoActive ) || ( r_ohClassic && r_ohClassic->integer ) )
 	{
 		return qfalse;
 	}

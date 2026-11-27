@@ -2413,17 +2413,41 @@ void Com_ExecuteCfg(void)
 			Cvar_Get( "in_androidDefaults", "0", CVAR_ARCHIVE );
 			Cvar_Set( "in_androidDefaults", XSTRING( ANDROID_DEFAULTS_VERSION ) );
 		}
-#elif defined( ELITEFORCE ) && defined( __linux__ )
-		// One-time DESKTOP input defaults: the same EF1 dual-analog gamepad
-		// binds the Android build installs, applied in code because the
-		// desktop port has no shipped baseEF/*.cfg (that directory is the
-		// user's retail data). Keyboard + mouse retail binds still come from
-		// the game's own default.cfg inside pak0.  Same one-shot stamp
-		// scheme as Android so user rebinds in the Controls menu persist.
-#define DESKTOP_DEFAULTS_VERSION 1
+#elif defined( ELITEFORCE ) && !defined( DEDICATED )
+		// One-time DESKTOP input defaults across Linux, macOS, and Windows:
+		// modern FPS keyboard/mouse layout (WASD, Space jump, Ctrl/C crouch,
+		// Shift walk, E use, F holdable item, Mouse2 alt-fire, F5/F9 quick
+		// save/load, F8 OpenHazard live A/B toggle) plus dual-analog gamepad
+		// binds. Uses a one-shot version stamp so later user rebinds persist.
+#define DESKTOP_DEFAULTS_VERSION 2
 		if ( Cvar_VariableIntegerValue( "in_desktopDefaults" ) < DESKTOP_DEFAULTS_VERSION )
 		{
 			Cbuf_AddText(
+				"seta cl_freelook 1\n"
+				"seta m_filter 0\n"
+				"seta cl_mouseAccel 0\n"
+				"bind w \"+forward\"\n"
+				"bind s \"+back\"\n"
+				"bind a \"+moveleft\"\n"
+				"bind d \"+moveright\"\n"
+				"bind SPACE \"+moveup\"\n"
+				"bind CTRL \"+movedown\"\n"
+				"bind c \"+movedown\"\n"
+				"bind SHIFT \"+speed\"\n"
+				"bind e \"+use\"\n"
+				"bind f \"+button2\"\n"
+				"bind q \"weapprev\"\n"
+				"bind r \"+zoom\"\n"
+				"bind z \"+zoom\"\n"
+				"bind v \"+button3\"\n"
+				"bind MOUSE1 \"+attack\"\n"
+				"bind MOUSE2 \"+altattack\"\n"
+				"bind MOUSE3 \"+zoom\"\n"
+				"bind MWHEELUP \"weapprev\"\n"
+				"bind MWHEELDOWN \"weapnext\"\n"
+				"bind F5 \"save quik\"\n"
+				"bind F8 \"oh_toggle\"\n"
+				"bind F9 \"load quik\"\n"
 				"seta in_joystick 1\n"
 				"seta in_joystickUseAnalog 1\n"
 				"seta joy_threshold 0.15\n"
