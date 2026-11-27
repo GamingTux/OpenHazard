@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16...3.31)
 
 project(OpenHazard
-  VERSION 1.0.1
+  VERSION 1.0.2
   DESCRIPTION "OpenHazard: Portable 64-bit Vulkan port of Star Trek: Voyager - Elite Force"
   LANGUAGES C CXX
 )

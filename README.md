@@ -49,12 +49,12 @@ Every push and release tag builds **6 self-contained, single-folder portable arc
 
 | Platform | Architecture | Portable Archive |
 |---|---|---|
-| Linux | `x86_64` | `OpenHazard-1.0.1-linux-x86_64.tar.gz` |
-| Linux (Raspberry Pi 4/5, SBCs) | `arm64` | `OpenHazard-1.0.1-linux-arm64.tar.gz` |
-| macOS (Apple Silicon) | `arm64` | `OpenHazard-1.0.1-macos-arm64.tar.gz` |
-| macOS (Intel) | `x86_64` | `OpenHazard-1.0.1-macos-x86_64.tar.gz` |
-| Windows | `x86_64` | `OpenHazard-1.0.1-windows-x86_64.zip` |
-| Windows | `arm64` | `OpenHazard-1.0.1-windows-arm64.zip` |
+| Linux | `x86_64` | `OpenHazard-1.0.2-linux-x86_64.tar.gz` |
+| Linux (Raspberry Pi 4/5, SBCs) | `arm64` | `OpenHazard-1.0.2-linux-arm64.tar.gz` |
+| macOS (Apple Silicon) | `arm64` | `OpenHazard-1.0.2-macos-arm64.tar.gz` |
+| macOS (Intel) | `x86_64` | `OpenHazard-1.0.2-macos-x86_64.tar.gz` |
+| Windows | `x86_64` | `OpenHazard-1.0.2-windows-x86_64.zip` |
+| Windows | `arm64` | `OpenHazard-1.0.2-windows-arm64.zip` |
 
 ### Game Data Directory
 
