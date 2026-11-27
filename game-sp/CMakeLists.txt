@@ -32,7 +32,8 @@ else()
   set(EF_COPTS
     -include "${COMPAT}/ef_linux_compat.h"
     -fno-threadsafe-statics
-    -fcommon
+    -fno-common
+    $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions>
   )
   if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
     list(APPEND EF_COPTS -w $<$<COMPILE_LANGUAGE:CXX>:-Wno-narrowing>)
@@ -74,7 +75,16 @@ add_library(efgame SHARED ${EFGAME_SRC})
 target_include_directories(efgame PRIVATE ${EF_INCLUDES})
 target_compile_options(efgame PRIVATE ${EF_COPTS})
 target_compile_definitions(efgame PRIVATE NDEBUG)
-ef_apply_common_flags(efgame)
+ef_apply_common_flags(efgame O3)
+if(NOT MSVC)
+  # Preserve bit-identical ARM64 <-> x86_64 movement & overbounce physics (no FMA ULP drift).
+  set_source_files_properties(
+    "${SRC}/game/bg_pmove.cpp"
+    "${SRC}/game/bg_slidemove.cpp"
+    "${SRC}/speedrun/overbounce_prediction/OverbouncePrediction.cpp"
+    PROPERTIES COMPILE_OPTIONS "$<$<NOT:$<CONFIG:Debug>>:-ffp-contract=off>"
+  )
+endif()
 ef_apply_lto(efgame)
 
 if(APPLE)
@@ -110,7 +120,11 @@ add_library(efui SHARED ${EFUI_SRC} ${EF_SHARED_SRC})
 target_include_directories(efui PRIVATE ${EF_INCLUDES})
 target_compile_options(efui PRIVATE ${EF_COPTS})
 target_compile_definitions(efui PRIVATE NDEBUG _USRDLL UI_EXPORTS)
-ef_apply_common_flags(efui)
+ef_apply_common_flags(efui Os)
+if(MSVC)
+  # efui has zero STL usage — safe to disable C++ exception unwinding on MSVC too.
+  target_compile_options(efui PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/EHs-c->)
+endif()
 ef_apply_lto(efui)
 
 if(APPLE)

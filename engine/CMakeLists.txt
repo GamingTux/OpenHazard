@@ -78,7 +78,11 @@ file(GLOB JPEG_SRC "${EF}/jpeg-8c/*.c")
 add_library(ef_jpeg_obj OBJECT ${JPEG_SRC})
 set_target_properties(ef_jpeg_obj PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(ef_jpeg_obj PRIVATE "${EF}/jpeg-8c")
-ef_apply_common_flags(ef_jpeg_obj)
+ef_apply_common_flags(ef_jpeg_obj O3)
+if(NOT MSVC)
+  # Clean union-based allocator in jpeg-8c: strict aliasing speeds up IDCT/color conv.
+  target_compile_options(ef_jpeg_obj PRIVATE $<$<NOT:$<CONFIG:Debug>>:-fstrict-aliasing>)
+endif()
 ef_apply_lto(ef_jpeg_obj)
 
 set(LIBMAD_SRC
@@ -99,7 +103,11 @@ target_compile_definitions(ef_libmad_obj PRIVATE
   FPM_64BIT
   ARCH_STRING="${EF_ARCH_STRING}"
 )
-ef_apply_common_flags(ef_libmad_obj)
+ef_apply_common_flags(ef_libmad_obj O3)
+if(NOT MSVC)
+  # Clean 64-bit fixed-point MP3 synth: strict aliasing safe & faster.
+  target_compile_options(ef_libmad_obj PRIVATE $<$<NOT:$<CONFIG:Debug>>:-fstrict-aliasing>)
+endif()
 ef_apply_lto(ef_libmad_obj)
 
 file(GLOB BOTLIB_SRC "${EF}/botlib/*.c")
@@ -112,7 +120,12 @@ target_compile_definitions(ef_botlib_obj PRIVATE
   USE_LOCAL_HEADERS=1
   ARCH_STRING="${EF_ARCH_STRING}"
 )
-ef_apply_common_flags(ef_botlib_obj)
+# 32k LOC branch-heavy AAS/AI: -O2 (-Os on Clang Full-LTO) preserves L1i cache.
+if(CMAKE_C_COMPILER_ID MATCHES "Clang")
+  ef_apply_common_flags(ef_botlib_obj Os)
+else()
+  ef_apply_common_flags(ef_botlib_obj O2)
+endif()
 ef_apply_lto(ef_botlib_obj)
 
 # ---- Engine core sources ----
@@ -250,17 +263,18 @@ if(BUILD_SP)
     target_include_directories(sp_game_bridge BEFORE PRIVATE "${EFG}/compat")
   endif()
   if(MSVC)
-    target_compile_options(sp_game_bridge PRIVATE /W0 /Zc:strictStrings-)
+    target_compile_options(sp_game_bridge PRIVATE /W0 /Zc:strictStrings- $<$<COMPILE_LANGUAGE:CXX>:/EHs-c->)
   else()
     target_compile_options(sp_game_bridge PRIVATE
       -include "${EFG}/compat/ef_linux_compat.h"
       -fno-threadsafe-statics
-      -fcommon
+      -fno-common
+      $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions>
       -w
     )
   endif()
   target_compile_definitions(sp_game_bridge PRIVATE NDEBUG)
-  ef_apply_common_flags(sp_game_bridge)
+  ef_apply_common_flags(sp_game_bridge O2)
   ef_apply_lto(sp_game_bridge)
 endif()
 
@@ -409,7 +423,11 @@ if(BUILD_MP)
       -Werror=implicit-function-declaration
     )
   endif()
-  ef_apply_common_flags(openhazard-ded)
+  ef_apply_common_flags(openhazard-ded O2)
+  if(NOT MSVC)
+    # Deterministic cross-architecture collision/tick math without FMA drift
+    target_compile_options(openhazard-ded PRIVATE $<$<NOT:$<CONFIG:Debug>>:-ffp-contract=off>)
+  endif()
   ef_apply_lto(openhazard-ded)
   target_link_libraries(openhazard-ded PRIVATE ${EF_SYS_LIBS})
   set_target_properties(openhazard-ded PROPERTIES
@@ -445,7 +463,11 @@ if(NOT EF_STATIC_RENDERER)
       -Werror=implicit-function-declaration
     )
   endif()
-  ef_apply_common_flags(renderer_vulkan)
+  ef_apply_common_flags(renderer_vulkan O3)
+  if(NOT MSVC)
+    # Safe in renderervk (no copysign/-0.0f reliance); simplifies FP min/max/FMA chains.
+    target_compile_options(renderer_vulkan PRIVATE $<$<NOT:$<CONFIG:Debug>>:-fno-signed-zeros>)
+  endif()
   ef_apply_lto(renderer_vulkan)
   target_link_libraries(renderer_vulkan PRIVATE ${EF_SYS_LIBS})
   set_target_properties(renderer_vulkan PROPERTIES
