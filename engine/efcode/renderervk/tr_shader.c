@@ -3084,6 +3084,41 @@ static void DetectNeeds( void )
 }
 
 
+#ifdef USE_VULKAN
+static qboolean R_StageCanUseNormalMap( const shaderStage_t *pStage, Vk_Shader_Type shaderType ) {
+	int k;
+
+	if ( vk.maxBoundDescriptorSets < VK_DESC_COUNT )
+		return qfalse;
+	if ( pStage->isDetail || pStage->depthFragment )
+		return qfalse;
+	if ( pStage->stateBits & ( GLS_SRCBLEND_BITS | GLS_DSTBLEND_BITS ) )
+		return qfalse; // opaque or alpha-tested base pass only
+	if ( pStage->bundle[0].lightmap != LIGHTMAP_INDEX_NONE ||
+	     pStage->bundle[0].isVideoMap || pStage->bundle[0].isScreenMap )
+		return qfalse;
+
+	switch ( shaderType ) {
+		case TYPE_SIGNLE_TEXTURE:
+		case TYPE_SIGNLE_TEXTURE_IDENTITY:
+		case TYPE_SIGNLE_TEXTURE_FIXED_COLOR:
+		case TYPE_MULTI_TEXTURE_MUL2:
+		case TYPE_MULTI_TEXTURE_MUL2_IDENTITY:
+		case TYPE_MULTI_TEXTURE_MUL2_FIXED_COLOR:
+		case TYPE_BLEND2_MUL:
+			break;
+		default:
+			return qfalse;
+	}
+
+	for ( k = 0; k < MAX_IMAGE_ANIMATIONS; k++ ) {
+		if ( pStage->bundle[0].image[k] && pStage->bundle[0].image[k]->normalMap )
+			return qtrue;
+	}
+	return qfalse;
+}
+#endif
+
 /*
 =========================
 FinishShader
@@ -3605,10 +3640,21 @@ static shader_t *FinishShader( void ) {
 				}
 			}
 
+			def.normal_map = 0;
 			def.mirror = qfalse;
 			pStage->vk_pipeline[0] = vk_find_pipeline_ext( 0, &def, qtrue );
 			def.mirror = qtrue;
 			pStage->vk_mirror_pipeline[0] = vk_find_pipeline_ext( 0, &def, qfalse );
+
+			pStage->hasNormalMap = R_StageCanUseNormalMap( pStage, def.shader_type );
+			if ( pStage->hasNormalMap ) {
+				def.normal_map = 1;
+				def.mirror = qfalse;
+				pStage->vk_pipeline_nm[0] = vk_find_pipeline_ext( 0, &def, qtrue );
+				def.mirror = qtrue;
+				pStage->vk_mirror_pipeline_nm[0] = vk_find_pipeline_ext( 0, &def, qfalse );
+				def.normal_map = 0;
+			}
 
 			if ( pStage->depthFragment ) {
 				def.mirror = qfalse;
@@ -3635,6 +3681,13 @@ static shader_t *FinishShader( void ) {
 				pStage->vk_pipeline[1] = vk_find_pipeline_ext( 0, &def, qfalse );
 				pStage->vk_mirror_pipeline[1] = vk_find_pipeline_ext( 0, &def_mirror, qfalse );
 
+				if ( pStage->hasNormalMap ) {
+					def.normal_map = 1;
+					def_mirror.normal_map = 1;
+					pStage->vk_pipeline_nm[1] = vk_find_pipeline_ext( 0, &def, qfalse );
+					pStage->vk_mirror_pipeline_nm[1] = vk_find_pipeline_ext( 0, &def_mirror, qfalse );
+				}
+
 				pStage->bundle[0].adjustColorsForFog = ACFF_NONE; // will be handled in shader from now
 
 				shader.fogCollapse = qtrue;
@@ -3652,15 +3705,23 @@ static shader_t *FinishShader( void ) {
 			// pipeline mid-frame. The draw-time vk_find_pipeline_ext dedupes
 			// by def, so it finds these (already compiled) entries.
 			if ( !( pStage->stateBits & ( GLS_ATEST_BITS | GLS_SRCBLEND_BITS | GLS_DSTBLEND_BITS ) ) ) {
-				uint32_t fade_base[4];
+				uint32_t fade_base[8];
 				int n_fade = 0, fade_i;
 
 				fade_base[n_fade++] = pStage->vk_pipeline[0];
 				fade_base[n_fade++] = pStage->vk_mirror_pipeline[0];
+				if ( pStage->hasNormalMap ) {
+					fade_base[n_fade++] = pStage->vk_pipeline_nm[0];
+					fade_base[n_fade++] = pStage->vk_mirror_pipeline_nm[0];
+				}
 #ifdef USE_FOG_COLLAPSE
 				if ( fogCollapse && tr.numFogs > 0 ) {
 					fade_base[n_fade++] = pStage->vk_pipeline[1];
 					fade_base[n_fade++] = pStage->vk_mirror_pipeline[1];
+					if ( pStage->hasNormalMap ) {
+						fade_base[n_fade++] = pStage->vk_pipeline_nm[1];
+						fade_base[n_fade++] = pStage->vk_mirror_pipeline_nm[1];
+					}
 				}
 #endif
 				for ( fade_i = 0; fade_i < n_fade; fade_i++ ) {

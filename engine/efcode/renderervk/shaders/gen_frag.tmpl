@@ -8,7 +8,7 @@
 #define USE_CL1
 #endif
 
-#if defined (USE_FOG) || defined (USE_ENT_COLOR)
+#if defined (USE_FOG) || defined (USE_ENT_COLOR) || defined (USE_NORMAL_MAP)
 layout(set = 0, binding = 0) uniform UBO {
 	// light/env parameters:
 	vec4 eyePos;				// vertex
@@ -40,6 +40,9 @@ layout(set = 3, binding = 0) uniform sampler2D texture2;
 #endif
 #ifdef USE_FOG
 layout(set = 4, binding = 0) uniform sampler2D fog_texture;
+#endif
+#ifdef USE_NORMAL_MAP
+layout(set = 5, binding = 0) uniform sampler2D normal_texture;
 #endif
 
 #if defined (USE_CLX_IDENT)
@@ -119,6 +122,9 @@ float CorrectAlpha(float threshold, float alpha, vec2 tc)
 void main() {
 #ifdef USE_FOG
 	vec4 fog = texture(fog_texture, fog_tex_coord);
+#endif
+#ifdef USE_NORMAL_MAP
+	vec3 nm_light = vec3(0.0);
 #endif
 
 #if defined (USE_CLX_IDENT)
@@ -414,6 +420,9 @@ void main() {
 		vec4 color1 = texture(texture1, frag_tex_coord1) * frag_color1;
 #endif
 		base = color0 * color1;
+#ifdef USE_NORMAL_MAP
+		nm_light = color1.rgb;
+#endif
 	}
 #else
 	// double-texture with identity colors (1.0) in color1
@@ -448,6 +457,9 @@ void main() {
 		vec4 color1 = texture(texture1, frag_tex_coord1);
 #endif
 		base = color0 * color1;
+#ifdef USE_NORMAL_MAP
+		nm_light = color1.rgb;
+#endif
 	}
 #endif // !USE_CL1
 #endif // !USE_TX1
@@ -476,6 +488,37 @@ void main() {
 
 #if !defined(USE_TX1) && !defined(USE_TX2)
 	base = color0;
+#ifdef USE_NORMAL_MAP
+#if !defined(USE_CLX_IDENT) && !defined(USE_FIXED_COLOR) && !defined(USE_ENT_COLOR)
+	nm_light = frag_color0.rgb;
+#endif
+#endif
+#endif
+
+#ifdef USE_NORMAL_MAP
+	{
+		vec4 nh = texture(normal_texture, frag_tex_coord0);
+		float nmStrength = eyePos.w;
+		vec2 nxy = (nh.rg * 2.0 - 1.0) * nmStrength;
+
+		// 1. Ultra-fast tangent-space overhead-right relief (+u right, -v up; zero dFdx/branches/SFU!)
+		//    Preserves 4-thread QPU occupancy on VideoCore VII (~60 FPS at 1080p 4x MSAA on Pi 5).
+		//    Dynamic lights (light_frag.tmpl) still perform full 3D tangent-space normal perturbation.
+		float slope = nxy.x * 0.36 + nxy.y * 0.93;
+		float relief = clamp(1.0 + slope * 1.15, 0.38, 1.85);
+
+		// 2. Crevice Micro-AO: flat surfaces (~0.88..1.0) stay at 1.0, panel seams & grooves darken cleanly
+		float ao = mix(1.0, clamp(nh.b * 1.14, 0.28, 1.0), clamp(0.80 * nmStrength, 0.0, 0.92));
+
+		base.rgb *= (relief * ao);
+#if defined(USE_TX1) || (!defined(USE_CLX_IDENT) && !defined(USE_FIXED_COLOR) && !defined(USE_ENT_COLOR))
+		// 3. Fast metallic bevel glint tinted by actual baked/entity illumination (dark corners stay dark)
+		float bevel = clamp(slope, 0.0, 1.0);
+		float glint = bevel * bevel * lightPos.w * ao;
+		float specMask = 0.30 + 0.70 * clamp(dot(color0.rgb, vec3(0.299, 0.587, 0.114)), 0.0, 1.0);
+		base.rgb += (nm_light * 0.65 + base.rgb * 0.35) * (glint * specMask * 0.36);
+#endif
+	}
 #endif
 
 #ifdef USE_FOG

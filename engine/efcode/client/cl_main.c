@@ -2099,6 +2099,7 @@ static const char *oh_saved_cvar_names[] = {
 	"r_bloom_threshold",
 	"r_ssao",
 	"r_ssao_intensity",
+	"r_normalMapping",
 	"r_hdr",
 	"r_tonemap",
 	"r_sharpen",
@@ -2179,6 +2180,7 @@ static void CL_OpenHazardToggle_f( void ) {
 		Cvar_Set( "r_lodbias", "0" );
 		Cvar_Set( "r_bloom", "0" );
 		Cvar_Set( "r_ssao", "0" );
+		Cvar_Set( "r_normalMapping", "0" );
 		Cvar_Set( "r_hdr", "0" );
 		Cvar_Set( "r_tonemap", "0" );
 		Cvar_Set( "r_sharpen", "0" );
@@ -2206,12 +2208,13 @@ static void CL_OpenHazardToggle_f( void ) {
 		Cvar_Set( "r_bloom_threshold", "0.70" );
 		Cvar_Set( "r_ssao", "1" );
 		Cvar_Set( "r_ssao_intensity", "0.75" );
+		Cvar_Set( "r_normalMapping", "1" );
 		Cvar_Set( "r_hdr", "1" );
 		Cvar_Set( "r_tonemap", "1" );
 		Cvar_Set( "r_sharpen", "0.25" );
 		oh_toggle_state.vanillaMode = qfalse;
 
-		Com_Printf( "^3[OpenHazard F8] ^2MAXIMAL + HD ASTC ^7(4x MSAA, 16x AF, Bloom, SSAO, HDR, CAS + 2x HD ASTC)\n" );
+		Com_Printf( "^3[OpenHazard F8] ^2MAXIMAL + HD ASTC ^7(4x MSAA, 16x AF, NormalMaps, Bloom, SSAO, HDR, CAS + 2x HD ASTC)\n" );
 	}
 
 	CL_OpenHazardApplyReload();

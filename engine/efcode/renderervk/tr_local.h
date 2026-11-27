@@ -537,6 +537,10 @@ typedef struct {
 	uint32_t		vk_pipeline[2]; // normal,fogged
 	uint32_t		vk_mirror_pipeline[2];
 
+	uint32_t		vk_pipeline_nm[2]; // normal-mapped, fogged
+	uint32_t		vk_mirror_pipeline_nm[2];
+	qboolean		hasNormalMap;
+
 	uint32_t		vk_pipeline_df; // depthFragment
 	uint32_t		vk_mirror_pipeline_df;
 #endif
@@ -716,6 +720,7 @@ typedef struct image_s {
 	// Descriptor set that contains single descriptor used to access the given image.
 	// It is updated only once during image initialization.
 	VkDescriptorSet descriptor;
+	struct image_s	*normalMap;			// optional <stem>_nh normal+microAO+height companion
 #else
 	GLuint		texnum;				// gl texture binding
 	GLint		internalFormat;
@@ -1132,7 +1137,7 @@ void		R_Modellist_f (void);
 
 //====================================================
 
-#define	MAX_DRAWIMAGES			2048
+#define	MAX_DRAWIMAGES			4096
 #define	MAX_SKINS				1024
 
 
@@ -1490,6 +1495,9 @@ extern cvar_t	*r_tonemap;
 extern cvar_t	*r_sharpen;
 extern cvar_t	*r_ssao;
 extern cvar_t	*r_ssao_intensity;
+extern cvar_t	*r_normalMapping;
+extern cvar_t	*r_normalStrength;
+extern cvar_t	*r_normalSpec;
 extern cvar_t	*r_ohClassic;
 extern cvar_t	*r_ext_multisample;
 extern cvar_t	*r_ext_supersample;

@@ -1152,6 +1152,7 @@ image_t *R_CreateImage( const char *name, const char *name2, byte *pic, int widt
 	image->handle = VK_NULL_HANDLE;
 	image->view = VK_NULL_HANDLE;
 	image->descriptor = VK_NULL_HANDLE;
+	image->normalMap = NULL;
 
 	upload_vk_image( image, pic );
 #else
@@ -1369,9 +1370,10 @@ static image_t *R_TryLoadKTX1ASTC( const char *name, imgFlags_t flags )
 		return NULL;
 	if ( flags & ( IMGFLAG_NO_COMPRESSION | IMGFLAG_LIGHTMAP ) )
 		return NULL;
-	if ( tr.mapLoading && r_mapGreyScale->value > 0 )
+	if ( !( flags & IMGFLAG_NOLIGHTSCALE ) && tr.mapLoading && r_mapGreyScale->value > 0 )
 		return NULL;
-	if ( r_intensity->value != 1.0f || ( !glConfig.deviceSupportsGamma && !vk.fboActive && r_gamma->value != 1.0f ) )
+	if ( !( flags & IMGFLAG_NOLIGHTSCALE ) &&
+	     ( r_intensity->value != 1.0f || ( !glConfig.deviceSupportsGamma && !vk.fboActive && r_gamma->value != 1.0f ) ) )
 		return NULL;
 	if ( name[0] == '*' )
 		return NULL;
@@ -1543,6 +1545,7 @@ static image_t *R_TryLoadKTX1ASTC( const char *name, imgFlags_t flags )
 	image->handle = VK_NULL_HANDLE;
 	image->view = VK_NULL_HANDLE;
 	image->descriptor = VK_NULL_HANDLE;
+	image->normalMap = NULL;
 
 	vk_create_image( image, upW, upH, uploadMips );
 	vk_upload_compressed_image( image, upW, upH, uploadMips, packed, mipOffsets, mipSizes, totalSize );
@@ -1552,6 +1555,68 @@ static image_t *R_TryLoadKTX1ASTC( const char *name, imgFlags_t flags )
 	return image;
 }
 #endif // USE_VULKAN
+
+
+#ifdef USE_VULKAN
+/*
+===============
+R_TryAttachNormalMap
+
+Automatically attaches an optional tangent-space <stem>_nh companion map
+(R=Normal.x, G=Normal.y, B=Micro-AO, A=Height; KTX1 ASTC 4x4 or TGA) to a
+loaded diffuse world/model image. Uses IMGFLAG_NOLIGHTSCALE so linear normal
+data is never gamma/intensity distorted.
+===============
+*/
+static void R_TryAttachNormalMap( image_t *image )
+{
+	static qboolean s_loadingNormal = qfalse;
+	char stripped[ MAX_QPATH ];
+	char nmPath[ MAX_QPATH ];
+	size_t len;
+	imgFlags_t nmFlags;
+
+	if ( s_loadingNormal || !image || !image->imgName || image->normalMap )
+		return;
+	if ( !r_normalMapping || !r_normalMapping->integer )
+		return;
+	if ( r_ohClassic && r_ohClassic->integer )
+		return;
+	if ( vk.maxBoundDescriptorSets < VK_DESC_COUNT )
+		return;
+	if ( image->imgName[0] == '*' || ( image->flags & IMGFLAG_LIGHTMAP ) )
+		return;
+
+	// Only world textures and 3D models use tangent-space normal maps
+	if ( Q_stricmpn( image->imgName, "textures/", 9 ) != 0 &&
+	     Q_stricmpn( image->imgName, "models/", 7 ) != 0 ) {
+		return;
+	}
+	if ( Q_stricmpn( image->imgName, "textures/detail/", 16 ) == 0 ||
+	     Q_stricmpn( image->imgName, "textures/common/", 16 ) == 0 ||
+	     Q_stricmpn( image->imgName, "textures/skies/", 15 ) == 0 ||
+	     Q_stricmpn( image->imgName, "textures/decals/", 16 ) == 0 ||
+	     Q_stricmpn( image->imgName, "textures/sfx/", 13 ) == 0 ||
+	     Q_stricmpn( image->imgName, "textures/effects/", 17 ) == 0 ) {
+		return;
+	}
+
+	COM_StripExtension( image->imgName, stripped, sizeof( stripped ) );
+	len = strlen( stripped );
+	if ( len < 2 || len + 8 >= sizeof( nmPath ) )
+		return;
+	if ( len >= 3 && Q_stricmp( stripped + len - 3, "_nh" ) == 0 )
+		return;
+
+	Com_sprintf( nmPath, sizeof( nmPath ), "%s_nh.tga", stripped );
+	nmFlags = ( image->flags & ( IMGFLAG_MIPMAP | IMGFLAG_PICMIP | IMGFLAG_CLAMPTOEDGE | IMGFLAG_CLAMPTOBORDER ) )
+	        | IMGFLAG_NOLIGHTSCALE;
+
+	s_loadingNormal = qtrue;
+	image->normalMap = R_FindImageFile( nmPath, nmFlags );
+	s_loadingNormal = qfalse;
+}
+#endif
 
 
 /*
@@ -1611,6 +1676,7 @@ image_t	*R_FindImageFile( const char *name, imgFlags_t flags )
 	// Prefer hardware-compressed KTX1 ASTC texture when supported by the GPU (Pi 4/5, ARM64, Apple Silicon).
 	image = R_TryLoadKTX1ASTC( name, flags );
 	if ( image ) {
+		R_TryAttachNormalMap( image );
 		return image;
 	}
 #endif
@@ -1623,7 +1689,7 @@ image_t	*R_FindImageFile( const char *name, imgFlags_t flags )
 		return NULL;
 	}
 
-	if ( tr.mapLoading && r_mapGreyScale->value > 0 ) {
+	if ( !( flags & IMGFLAG_NOLIGHTSCALE ) && tr.mapLoading && r_mapGreyScale->value > 0 ) {
 		byte *img;
 		int i;
 		for ( i = 0, img = pic; i < width * height; i++, img += 4 ) {
@@ -1643,6 +1709,9 @@ image_t	*R_FindImageFile( const char *name, imgFlags_t flags )
 
 	image = R_CreateImage( name, localName, pic, width, height, flags );
 	ri.Free( pic );
+#ifdef USE_VULKAN
+	R_TryAttachNormalMap( image );
+#endif
 	return image;
 }
 

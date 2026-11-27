@@ -14,7 +14,7 @@
 #define MIN_SWAPCHAIN_IMAGES_MAILBOX 3
 
 #define MAX_VK_SAMPLERS 32
-#define MAX_VK_PIPELINES ((1024 + 128)*2)
+#define MAX_VK_PIPELINES ((2048 + 256)*2)
 
 #define VERTEX_BUFFER_SIZE     (4 * 1024 * 1024)  /* by default */
 #define VERTEX_BUFFER_SIZE_HI  (8 * 1024 * 1024)
@@ -60,7 +60,8 @@
 #define VK_DESC_TEXTURE1     2
 #define VK_DESC_TEXTURE2     3
 #define VK_DESC_FOG_COLLAPSE 4
-#define VK_DESC_COUNT        5
+#define VK_DESC_NORMAL       5
+#define VK_DESC_COUNT        6
 
 #define VK_DESC_TEXTURE_BASE VK_DESC_TEXTURE0
 #define VK_DESC_FOG_ONLY     VK_DESC_TEXTURE1
@@ -204,6 +205,7 @@ typedef struct {
 	int allow_discard;
 	int acff; // none, rgb, rgba, alpha
 	int depth_clear; // fullscreen depth-clear quad: depth test ALWAYS + write, color writes off
+	int normal_map;  // tangent-space normal + micro-AO shading (-DUSE_NORMAL_MAP)
 	struct {
 		byte rgb;
 		byte alpha;
@@ -363,6 +365,7 @@ typedef struct vk_tess_s {
 
 	VkDescriptorSet uniform_descriptor;
 	uint32_t		uniform_read_offset;
+	uint32_t		nm_uniform_offset; // per-frame cached static normal-map UBO offset (~0U = not pushed yet)
 	VkDeviceSize	buf_offset[8];
 	VkDeviceSize	vbo_offset[8];
 
@@ -371,7 +374,7 @@ typedef struct vk_tess_s {
 
 	struct {
 		uint32_t		start, end;
-		VkDescriptorSet	current[5]; // 0:uniform, 1:color0, 2:color1, 3:color2, 4:fog
+		VkDescriptorSet	current[VK_DESC_COUNT]; // 0:uniform, 1:color0, 2:color1, 3:color2, 4:fog, 5:normal
 		uint32_t		offset[1]; // 0 (uniform)
 	} descriptor_set;
 
@@ -539,6 +542,10 @@ typedef struct {
 			VkShaderModule fixed[2][2];  // tx[0,1], fog[0,1]
 			VkShaderModule ent[1][2];    // tx[0], fog[0,1]
 			VkShaderModule light[2][2];  // linear[0,1] fog[0,1]
+			VkShaderModule gen_nm[2][2][2]; // tx[0,1], cl[0,1], fog[0,1]
+			VkShaderModule ident1_nm[2][2]; // tx[0,1], fog[0,1]
+			VkShaderModule fixed_nm[2][2];  // tx[0,1], fog[0,1]
+			VkShaderModule light_nm[2][2];  // linear[0,1], fog[0,1]
 		} frag;
 
 		VkShaderModule color_fs;
@@ -603,6 +610,8 @@ typedef struct {
 #ifdef USE_PMLIGHT
 	uint32_t dlight_pipelines_x[3][2][2][2];
 	uint32_t dlight1_pipelines_x[3][2][2][2];
+	uint32_t dlight_pipelines_nm_x[3][2][2][2];
+	uint32_t dlight1_pipelines_nm_x[3][2][2][2];
 #endif
 
 	// debug visualization pipelines

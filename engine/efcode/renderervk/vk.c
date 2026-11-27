@@ -14,7 +14,7 @@ static int vkMaxSamples = VK_SAMPLE_COUNT_1_BIT;
 static VkInstance vk_instance = VK_NULL_HANDLE;
 static VkSurfaceKHR vk_surface = VK_NULL_HANDLE;
 
-#define VK_PIPELINE_HASH_SIZE 4096
+#define VK_PIPELINE_HASH_SIZE 8192
 #define VK_PIPELINE_HASH_MASK (VK_PIPELINE_HASH_SIZE - 1)
 static int32_t vk_pipeline_hash[VK_PIPELINE_HASH_SIZE];
 static qboolean vk_pipeline_hash_ready = qfalse;
@@ -3327,6 +3327,29 @@ static void vk_create_shader_modules( void )
 	SET_OBJECT_NAME( vk.modules.frag.light[1][0], "linear light fragment module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
 	SET_OBJECT_NAME( vk.modules.frag.light[1][1], "linear light fog fragment module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
 
+	// Normal-mapped fragment shader modules (-DUSE_NORMAL_MAP; static pass reuses existing vertex shaders)
+	vk.modules.frag.gen_nm[0][0][0] = SHADER_MODULE( frag_tx0_nm );
+	vk.modules.frag.gen_nm[0][0][1] = SHADER_MODULE( frag_tx0_fog_nm );
+	vk.modules.frag.gen_nm[1][0][0] = SHADER_MODULE( frag_tx1_nm );
+	vk.modules.frag.gen_nm[1][0][1] = SHADER_MODULE( frag_tx1_fog_nm );
+	vk.modules.frag.gen_nm[1][1][0] = SHADER_MODULE( frag_tx1_cl_nm );
+	vk.modules.frag.gen_nm[1][1][1] = SHADER_MODULE( frag_tx1_cl_fog_nm );
+
+	vk.modules.frag.ident1_nm[0][0] = SHADER_MODULE( frag_tx0_ident1_nm );
+	vk.modules.frag.ident1_nm[0][1] = SHADER_MODULE( frag_tx0_ident1_fog_nm );
+	vk.modules.frag.ident1_nm[1][0] = SHADER_MODULE( frag_tx1_ident1_nm );
+	vk.modules.frag.ident1_nm[1][1] = SHADER_MODULE( frag_tx1_ident1_fog_nm );
+
+	vk.modules.frag.fixed_nm[0][0] = SHADER_MODULE( frag_tx0_fixed_nm );
+	vk.modules.frag.fixed_nm[0][1] = SHADER_MODULE( frag_tx0_fixed_fog_nm );
+	vk.modules.frag.fixed_nm[1][0] = SHADER_MODULE( frag_tx1_fixed_nm );
+	vk.modules.frag.fixed_nm[1][1] = SHADER_MODULE( frag_tx1_fixed_fog_nm );
+
+	vk.modules.frag.light_nm[0][0] = SHADER_MODULE( frag_light_nm );
+	vk.modules.frag.light_nm[0][1] = SHADER_MODULE( frag_light_fog_nm );
+	vk.modules.frag.light_nm[1][0] = SHADER_MODULE( frag_light_line_nm );
+	vk.modules.frag.light_nm[1][1] = SHADER_MODULE( frag_light_line_fog_nm );
+
 	vk.modules.color_fs = SHADER_MODULE( color_frag_spv );
 	vk.modules.color_vs = SHADER_MODULE( color_vert_spv );
 
@@ -3500,11 +3523,18 @@ static void vk_alloc_persistent_pipelines( void )
 					def.fog_stage = k; // fogStage
 					for ( l = 0; l < 2; l++ ) {
 						def.abs_light = l;
+						def.normal_map = 0;
 						def.shader_type = TYPE_SIGNLE_TEXTURE_LIGHTING;
 						vk.dlight_pipelines_x[i][j][k][l] = vk_find_pipeline_ext( 0, &def, qfalse );
 						def.shader_type = TYPE_SIGNLE_TEXTURE_LIGHTING_LINEAR;
 						vk.dlight1_pipelines_x[i][j][k][l] = vk_find_pipeline_ext( 0, &def, qfalse );
+						def.normal_map = 1;
+						def.shader_type = TYPE_SIGNLE_TEXTURE_LIGHTING;
+						vk.dlight_pipelines_nm_x[i][j][k][l] = vk_find_pipeline_ext( 0, &def, qfalse );
+						def.shader_type = TYPE_SIGNLE_TEXTURE_LIGHTING_LINEAR;
+						vk.dlight1_pipelines_nm_x[i][j][k][l] = vk_find_pipeline_ext( 0, &def, qfalse );
 					}
+					def.normal_map = 0;
 				}
 			}
 		}
@@ -5161,10 +5191,12 @@ void vk_initialize( void )
 		set_layouts[2] = vk.set_layout_sampler; // lightmap / fog-only
 		set_layouts[3] = vk.set_layout_sampler; // blend
 		set_layouts[4] = vk.set_layout_sampler; // collapsed fog texture
+		set_layouts[5] = vk.set_layout_sampler; // tangent-space normal + micro-AO + height (_nh)
 		desc.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
 		desc.pNext = NULL;
 		desc.flags = 0;
-		desc.setLayoutCount = (vk.maxBoundDescriptorSets >= VK_DESC_COUNT) ? VK_DESC_COUNT : 4;
+		desc.setLayoutCount = (vk.maxBoundDescriptorSets >= VK_DESC_COUNT) ? VK_DESC_COUNT
+		                    : (vk.maxBoundDescriptorSets >= 5) ? 5 : 4;
 		desc.pSetLayouts = set_layouts;
 		desc.pushConstantRangeCount = 1;
 		desc.pPushConstantRanges = &push_range;
@@ -5570,6 +5602,24 @@ void vk_shutdown( refShutdownCode_t code )
 			if ( vk.modules.frag.light[i][j] != VK_NULL_HANDLE ) {
 				qvkDestroyShaderModule( vk.device, vk.modules.frag.light[i][j], NULL );
 				vk.modules.frag.light[i][j] = VK_NULL_HANDLE;
+			}
+			if ( vk.modules.frag.light_nm[i][j] != VK_NULL_HANDLE ) {
+				qvkDestroyShaderModule( vk.device, vk.modules.frag.light_nm[i][j], NULL );
+				vk.modules.frag.light_nm[i][j] = VK_NULL_HANDLE;
+			}
+			if ( vk.modules.frag.ident1_nm[i][j] != VK_NULL_HANDLE ) {
+				qvkDestroyShaderModule( vk.device, vk.modules.frag.ident1_nm[i][j], NULL );
+				vk.modules.frag.ident1_nm[i][j] = VK_NULL_HANDLE;
+			}
+			if ( vk.modules.frag.fixed_nm[i][j] != VK_NULL_HANDLE ) {
+				qvkDestroyShaderModule( vk.device, vk.modules.frag.fixed_nm[i][j], NULL );
+				vk.modules.frag.fixed_nm[i][j] = VK_NULL_HANDLE;
+			}
+			for ( k = 0; k < 2; k++ ) {
+				if ( vk.modules.frag.gen_nm[i][j][k] != VK_NULL_HANDLE ) {
+					qvkDestroyShaderModule( vk.device, vk.modules.frag.gen_nm[i][j][k], NULL );
+					vk.modules.frag.gen_nm[i][j][k] = VK_NULL_HANDLE;
+				}
 			}
 		}
 	}
@@ -6949,6 +6999,40 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 		default:
 			ri.Error(ERR_DROP, "create_pipeline: unknown shader type %i\n", def->shader_type);
 			return 0;
+	}
+
+	if ( def->normal_map ) {
+		switch ( def->shader_type ) {
+			case TYPE_SIGNLE_TEXTURE_LIGHTING:
+				fs_module = &vk.modules.frag.light_nm[0][0];
+				break;
+			case TYPE_SIGNLE_TEXTURE_LIGHTING_LINEAR:
+				fs_module = &vk.modules.frag.light_nm[1][0];
+				break;
+			case TYPE_SIGNLE_TEXTURE:
+				fs_module = &vk.modules.frag.gen_nm[0][0][0];
+				break;
+			case TYPE_SIGNLE_TEXTURE_IDENTITY:
+				fs_module = &vk.modules.frag.ident1_nm[0][0];
+				break;
+			case TYPE_SIGNLE_TEXTURE_FIXED_COLOR:
+				fs_module = &vk.modules.frag.fixed_nm[0][0];
+				break;
+			case TYPE_MULTI_TEXTURE_MUL2:
+				fs_module = &vk.modules.frag.gen_nm[1][0][0];
+				break;
+			case TYPE_MULTI_TEXTURE_MUL2_IDENTITY:
+				fs_module = &vk.modules.frag.ident1_nm[1][0];
+				break;
+			case TYPE_MULTI_TEXTURE_MUL2_FIXED_COLOR:
+				fs_module = &vk.modules.frag.fixed_nm[1][0];
+				break;
+			case TYPE_BLEND2_MUL:
+				fs_module = &vk.modules.frag.gen_nm[1][1][0];
+				break;
+			default:
+				break;
+		}
 	}
 
 	if ( def->fog_stage ) {
@@ -8586,6 +8670,7 @@ static void vk_begin_render_pass( VkRenderPass renderPass, VkFramebuffer frameBu
 	qvkCmdBeginRenderPass( vk.cmd->command_buffer, &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE );
 
 	vk.cmd->last_pipeline = VK_NULL_HANDLE;
+	vk.cmd->nm_uniform_offset = ~0U;
 	vk.cmd->depth_range = DEPTH_RANGE_COUNT;
 }
 
@@ -8803,6 +8888,7 @@ _retry:
 	}
 
 	vk.cmd->last_pipeline = VK_NULL_HANDLE;
+	vk.cmd->nm_uniform_offset = ~0U;
 
 	backEnd.screenMapDone = qfalse;
 
@@ -8885,7 +8971,8 @@ void vk_end_frame( void )
 
 	if ( vk.fboActive )
 	{
-		vk.cmd->last_pipeline = VK_NULL_HANDLE; // do not restore clobbered descriptors in vk_bloom()
+		vk.cmd->last_pipeline = VK_NULL_HANDLE;
+	vk.cmd->nm_uniform_offset = ~0U; // do not restore clobbered descriptors in vk_bloom()
 
 		if ( ( vk.bloomActive || vk.ssaoActive ) && !( r_ohClassic && r_ohClassic->integer ) )
 		{
@@ -9535,7 +9622,7 @@ qboolean vk_bloom( void )
 		vk.cmd->depth_range = DEPTH_RANGE_COUNT;
 
 		// restore clobbered descriptor sets
-		for ( i = 0; i < VK_NUM_BLOOM_PASSES; i++ ) {
+		for ( i = 0; i < ( ( vk.maxBoundDescriptorSets >= VK_DESC_COUNT ) ? VK_DESC_COUNT : VK_NUM_BLOOM_PASSES ); i++ ) {
 			if ( vk.cmd->descriptor_set.current[i] != VK_NULL_HANDLE ) {
 				if ( i == VK_DESC_UNIFORM /*|| i == VK_DESC_STORAGE*/ )
 					qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout, i, 1, &vk.cmd->descriptor_set.current[i], 1, &vk.cmd->descriptor_set.offset[i] );

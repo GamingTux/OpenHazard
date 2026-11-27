@@ -267,4 +267,44 @@ for %%f in (*.frag) do (
 "%cl%" -S frag -V -o "%tmpf%" gen_frag.tmpl -DUSE_CL2 -DUSE_TX2 -DUSE_FOG
 "%bh%" "%tmpf%" %outf% frag_tx2_cl_fog
 
+@rem normal-mapped fragment shaders (-DUSE_NORMAL_MAP; static pass reuses existing vertex shaders)
+
+"%cl%" -S frag -V -o "%tmpf%" light_frag.tmpl -DUSE_NORMAL_MAP
+"%bh%" "%tmpf%" %outf% frag_light_nm
+"%cl%" -S frag -V -o "%tmpf%" light_frag.tmpl -DUSE_NORMAL_MAP -DUSE_FOG
+"%bh%" "%tmpf%" %outf% frag_light_fog_nm
+"%cl%" -S frag -V -o "%tmpf%" light_frag.tmpl -DUSE_NORMAL_MAP -DUSE_LINE
+"%bh%" "%tmpf%" %outf% frag_light_line_nm
+"%cl%" -S frag -V -o "%tmpf%" light_frag.tmpl -DUSE_NORMAL_MAP -DUSE_LINE -DUSE_FOG
+"%bh%" "%tmpf%" %outf% frag_light_line_fog_nm
+
+"%cl%" -S frag -V -o "%tmpf%" gen_frag.tmpl -DUSE_NORMAL_MAP -DUSE_ATEST
+"%bh%" "%tmpf%" %outf% frag_tx0_nm
+"%cl%" -S frag -V -o "%tmpf%" gen_frag.tmpl -DUSE_NORMAL_MAP -DUSE_ATEST -DUSE_FOG
+"%bh%" "%tmpf%" %outf% frag_tx0_fog_nm
+"%cl%" -S frag -V -o "%tmpf%" gen_frag.tmpl -DUSE_NORMAL_MAP -DUSE_CLX_IDENT -DUSE_ATEST
+"%bh%" "%tmpf%" %outf% frag_tx0_ident1_nm
+"%cl%" -S frag -V -o "%tmpf%" gen_frag.tmpl -DUSE_NORMAL_MAP -DUSE_CLX_IDENT -DUSE_ATEST -DUSE_FOG
+"%bh%" "%tmpf%" %outf% frag_tx0_ident1_fog_nm
+"%cl%" -S frag -V -o "%tmpf%" gen_frag.tmpl -DUSE_NORMAL_MAP -DUSE_FIXED_COLOR -DUSE_ATEST
+"%bh%" "%tmpf%" %outf% frag_tx0_fixed_nm
+"%cl%" -S frag -V -o "%tmpf%" gen_frag.tmpl -DUSE_NORMAL_MAP -DUSE_FIXED_COLOR -DUSE_ATEST -DUSE_FOG
+"%bh%" "%tmpf%" %outf% frag_tx0_fixed_fog_nm
+"%cl%" -S frag -V -o "%tmpf%" gen_frag.tmpl -DUSE_NORMAL_MAP -DUSE_TX1
+"%bh%" "%tmpf%" %outf% frag_tx1_nm
+"%cl%" -S frag -V -o "%tmpf%" gen_frag.tmpl -DUSE_NORMAL_MAP -DUSE_TX1 -DUSE_FOG
+"%bh%" "%tmpf%" %outf% frag_tx1_fog_nm
+"%cl%" -S frag -V -o "%tmpf%" gen_frag.tmpl -DUSE_NORMAL_MAP -DUSE_CL1 -DUSE_TX1
+"%bh%" "%tmpf%" %outf% frag_tx1_cl_nm
+"%cl%" -S frag -V -o "%tmpf%" gen_frag.tmpl -DUSE_NORMAL_MAP -DUSE_CL1 -DUSE_TX1 -DUSE_FOG
+"%bh%" "%tmpf%" %outf% frag_tx1_cl_fog_nm
+"%cl%" -S frag -V -o "%tmpf%" gen_frag.tmpl -DUSE_NORMAL_MAP -DUSE_CLX_IDENT -DUSE_TX1
+"%bh%" "%tmpf%" %outf% frag_tx1_ident1_nm
+"%cl%" -S frag -V -o "%tmpf%" gen_frag.tmpl -DUSE_NORMAL_MAP -DUSE_CLX_IDENT -DUSE_TX1 -DUSE_FOG
+"%bh%" "%tmpf%" %outf% frag_tx1_ident1_fog_nm
+"%cl%" -S frag -V -o "%tmpf%" gen_frag.tmpl -DUSE_NORMAL_MAP -DUSE_FIXED_COLOR -DUSE_TX1
+"%bh%" "%tmpf%" %outf% frag_tx1_fixed_nm
+"%cl%" -S frag -V -o "%tmpf%" gen_frag.tmpl -DUSE_NORMAL_MAP -DUSE_FIXED_COLOR -DUSE_TX1 -DUSE_FOG
+"%bh%" "%tmpf%" %outf% frag_tx1_fixed_fog_nm
+
 del /Q "%tmpf%"

@@ -56,6 +56,27 @@ shaderCommands_t	tess;
 static qboolean	setArraysOnce;
 #endif
 
+#ifdef USE_VULKAN
+static image_t *R_GetAnimatedImage( const textureBundle_t *bundle ) {
+	int64_t index;
+	double	v;
+
+	if ( bundle->isVideoMap || bundle->isScreenMap ) {
+		return NULL;
+	}
+	if ( bundle->numImageAnimations <= 1 ) {
+		return bundle->image[0];
+	}
+	v = tess.shaderTime * bundle->imageAnimationSpeed;
+	index = v;
+	if ( index < 0 ) {
+		index = 0;
+	}
+	index %= bundle->numImageAnimations;
+	return bundle->image[ index ];
+}
+#endif
+
 /*
 =================
 R_BindAnimatedImage
@@ -989,6 +1010,8 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 #endif
 
 #ifdef USE_VULKAN
+		image_t *nmImg = NULL;
+
 		tess_flags |= pStage->tessFlags;
 
 		for ( i = 0;  i < pStage->numTexBundles; i++ ) {
@@ -1011,6 +1034,34 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 			}
 		}
 
+		if ( pStage->hasNormalMap
+			&& r_normalMapping->integer
+			&& !( r_ohClassic && r_ohClassic->integer )
+			&& !backEnd.projection2D
+			&& !r_lightmap->integer
+			&& vk.maxBoundDescriptorSets >= VK_DESC_COUNT ) {
+			image_t *diffImg = R_GetAnimatedImage( &pStage->bundle[0] );
+			if ( diffImg && diffImg->normalMap ) {
+				nmImg = diffImg->normalMap;
+			}
+		}
+
+		if ( nmImg ) {
+			vk_update_descriptor( VK_DESC_NORMAL, nmImg->descriptor );
+			uniform.eyePos[3] = r_normalStrength->value;
+			uniform.light.pos[3] = r_normalSpec->value;
+			if ( !pushUniform ) {
+				if ( vk.cmd->nm_uniform_offset == ~0U ) {
+					vk.cmd->nm_uniform_offset = VK_PushUniform( &uniform );
+				} else if ( vk.cmd->descriptor_set.current[ VK_DESC_UNIFORM ] != vk.cmd->uniform_descriptor
+				         || vk.cmd->descriptor_set.offset[ VK_DESC_UNIFORM ] != vk.cmd->nm_uniform_offset ) {
+					vk_reset_descriptor( VK_DESC_UNIFORM );
+					vk_update_descriptor( VK_DESC_UNIFORM, vk.cmd->uniform_descriptor );
+					vk_update_descriptor_offset( VK_DESC_UNIFORM, vk.cmd->nm_uniform_offset );
+				}
+			}
+		}
+
 		if ( pushUniform ) {
 			pushUniform = qfalse;
 			VK_PushUniform( &uniform );
@@ -1023,7 +1074,13 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 			GL_Bind( tr.whiteImage ); // replace diffuse texture with a white one thus effectively render only lightmap
 		}
 
-		if ( backEnd.viewParms.portalView == PV_MIRROR ) {
+		if ( nmImg ) {
+			if ( backEnd.viewParms.portalView == PV_MIRROR ) {
+				pipeline = pStage->vk_mirror_pipeline_nm[fog_stage];
+			} else {
+				pipeline = pStage->vk_pipeline_nm[fog_stage];
+			}
+		} else if ( backEnd.viewParms.portalView == PV_MIRROR ) {
 			pipeline = pStage->vk_mirror_pipeline[fog_stage];
 		} else {
 			pipeline = pStage->vk_pipeline[fog_stage];
@@ -1160,7 +1217,8 @@ static void VK_SetLightParams( vkUniform_t *uniform, const dlight_t *dl ) {
 	radius = dl->radius;
 
 	// vertex data
-	VectorCopy( backEnd.or.viewOrigin, uniform->eyePos ); uniform->eyePos[3] = 0.0f;
+	VectorCopy( backEnd.or.viewOrigin, uniform->eyePos );
+	uniform->eyePos[3] = r_normalStrength ? r_normalStrength->value : 1.0f;
 	VectorCopy( dl->transformed, uniform->light.pos ); uniform->light.pos[3] = 0.0f;
 
 	// fragment data
@@ -1240,10 +1298,27 @@ void VK_LightingPass( void )
 	if ( fog_stage )
 		vk_update_descriptor( VK_DESC_FOG_DLIGHT, tr.fogImage->descriptor );
 
-	if ( tess.light->linear )
-		pipeline = vk.dlight1_pipelines_x[cull][tess.shader->polygonOffset][fog_stage][abs_light];
-	else
-		pipeline = vk.dlight_pipelines_x[cull][tess.shader->polygonOffset][fog_stage][abs_light];
+	{
+		image_t *diffImg = R_GetAnimatedImage( &pStage->bundle[ tess.shader->lightingBundle ] );
+		image_t *nmImg = NULL;
+		if ( diffImg && diffImg->normalMap
+			&& r_normalMapping->integer
+			&& !( r_ohClassic && r_ohClassic->integer )
+			&& vk.maxBoundDescriptorSets >= VK_DESC_COUNT ) {
+			nmImg = diffImg->normalMap;
+		}
+		if ( nmImg ) {
+			vk_update_descriptor( VK_DESC_NORMAL, nmImg->descriptor );
+			if ( tess.light->linear )
+				pipeline = vk.dlight1_pipelines_nm_x[cull][tess.shader->polygonOffset][fog_stage][abs_light];
+			else
+				pipeline = vk.dlight_pipelines_nm_x[cull][tess.shader->polygonOffset][fog_stage][abs_light];
+		} else if ( tess.light->linear ) {
+			pipeline = vk.dlight1_pipelines_x[cull][tess.shader->polygonOffset][fog_stage][abs_light];
+		} else {
+			pipeline = vk.dlight_pipelines_x[cull][tess.shader->polygonOffset][fog_stage][abs_light];
+		}
+	}
 
 	GL_SelectTexture( 0 );
 	R_BindAnimatedImage( &pStage->bundle[ tess.shader->lightingBundle ] );
