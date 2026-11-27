@@ -1258,6 +1258,7 @@ static void RB_CalcDiffuseColor_scalar( unsigned char *colors )
 	vec3_t			lightDir;
 	vec3_t			directedLight;
 	int				numVertexes;
+	qboolean		enhanced;
 	ent = backEnd.currentEntity;
 	ambientLightInt = ent->ambientLightInt;
 	VectorCopy( ent->ambientLight, ambientLight );
@@ -1268,6 +1269,78 @@ static void RB_CalcDiffuseColor_scalar( unsigned char *colors )
 	normal = tess.normal[0];
 
 	numVertexes = tess.numVertexes;
+#ifdef USE_VULKAN
+	enhanced = ( r_entityLighting && r_entityLighting->integer && !( r_ohClassic && r_ohClassic->integer ) ) ? qtrue : qfalse;
+#else
+	enhanced = qfalse;
+#endif
+
+	if ( enhanced ) {
+		vec3_t rimLight;
+		vec3_t viewOrigin;
+		VectorCopy( backEnd.or.viewOrigin, viewOrigin );
+		rimLight[0] = ambientLight[0] * 0.55f + directedLight[0] * 0.45f;
+		rimLight[1] = ambientLight[1] * 0.55f + directedLight[1] * 0.45f;
+		rimLight[2] = ambientLight[2] * 0.55f + directedLight[2] * 0.45f;
+
+		for ( i = 0; i < numVertexes; i++, v += 4, normal += 4 ) {
+			vec3_t viewer, halfv;
+			float len2, invLen, ndotv, rim, diff, wrap, shade, spec, ndoth;
+
+			incoming = DotProduct( normal, lightDir );
+			diff = ( incoming > 0.0f ) ? incoming : 0.0f;
+			wrap = ( incoming + 0.28f ) * ( 1.0f / 1.28f );
+			if ( wrap < 0.0f ) wrap = 0.0f;
+			else if ( wrap > 1.0f ) wrap = 1.0f;
+			shade = diff * 0.62f + wrap * 0.38f;
+
+			// View-dependent grazing rim highlight + subtle directional specular (0 GPU cost!)
+			viewer[0] = viewOrigin[0] - v[0];
+			viewer[1] = viewOrigin[1] - v[1];
+			viewer[2] = viewOrigin[2] - v[2];
+			len2 = DotProduct( viewer, viewer );
+			if ( len2 > 1e-6f ) {
+				invLen = 1.0f / sqrtf( len2 );
+				viewer[0] *= invLen;
+				viewer[1] *= invLen;
+				viewer[2] *= invLen;
+				ndotv = DotProduct( normal, viewer );
+				if ( ndotv < 0.0f ) ndotv = 0.0f;
+				else if ( ndotv > 1.0f ) ndotv = 1.0f;
+				rim = 1.0f - ndotv;
+				rim = rim * rim * rim * ( 0.14f + 0.22f * shade );
+
+				spec = 0.0f;
+				if ( diff > 0.0f ) {
+					halfv[0] = lightDir[0] + viewer[0];
+					halfv[1] = lightDir[1] + viewer[1];
+					halfv[2] = lightDir[2] + viewer[2];
+					len2 = DotProduct( halfv, halfv );
+					if ( len2 > 1e-6f ) {
+						ndoth = DotProduct( normal, halfv ) / sqrtf( len2 );
+						if ( ndoth > 0.0f ) {
+							float s2 = ndoth * ndoth;
+							float s4 = s2 * s2;
+							spec = s4 * s4 * 0.16f * diff;
+						}
+					}
+				}
+			} else {
+				rim = 0.0f;
+				spec = 0.0f;
+			}
+
+			j = myftol( ambientLight[0] + ( shade + spec ) * directedLight[0] + rim * rimLight[0] );
+			colors[i*4+0] = ( j > 255 ) ? 255 : ( j < 0 ? 0 : j );
+			j = myftol( ambientLight[1] + ( shade + spec ) * directedLight[1] + rim * rimLight[1] );
+			colors[i*4+1] = ( j > 255 ) ? 255 : ( j < 0 ? 0 : j );
+			j = myftol( ambientLight[2] + ( shade + spec ) * directedLight[2] + rim * rimLight[2] );
+			colors[i*4+2] = ( j > 255 ) ? 255 : ( j < 0 ? 0 : j );
+			colors[i*4+3] = 255;
+		}
+		return;
+	}
+
 	for (i = 0 ; i < numVertexes ; i++, v += 4, normal += 4) {
 		incoming = DotProduct (normal, lightDir);
 		if ( incoming <= 0 ) {

@@ -146,11 +146,13 @@ void main() {
 	vec3 dp2 = dFdy(-V.xyz);
 	vec3 Nw = perturbNormal(nN, dp1, dp2, frag_tex_coord, nh.rg * 2.0 - 1.0, eyePos.w);
 	float microAO = clamp(nh.b * 1.12, 0.35, 1.0);
+	float heightMod = clamp(0.76 + 0.48 * nh.a, 0.72, 1.20);
 
 	float geoDiff = dot(nN, nL);
 	float diffuse = dot(Nw, nL);
 	vec3 H = normalize(nL + nV);
 	float specFactor = dot(Nw, H);
+	float ndotv = dot(Nw, nV);
 
 	if ( abs_light != 0 )
 	{
@@ -158,18 +160,33 @@ void main() {
 			discard;
 		diffuse = abs( diffuse );
 		specFactor = abs( specFactor );
+		ndotv = abs( ndotv );
 	} else {
 		if ( geoDiff <= 0.0 )
 			discard;
 		diffuse = max( diffuse, 0.0 );
 		specFactor = max( specFactor, 0.0 );
+		ndotv = max( ndotv, 0.0 );
 	}
 
 	float luma = dot(base.rgb, vec3(0.299, 0.587, 0.114));
-	float specMask = (0.35 + 0.65 * luma) * microAO;
-	vec4 spec = vec4(pow(specFactor, 22.0) * 0.45 * specMask) * (base * 0.65 + vec4(0.35));
+	float specMask = (0.35 + 0.65 * luma) * microAO * lightPos.w;
 
-	out_color = (base * vec4(diffuse * microAO) + spec) * vec4(intens, 1.0);
+	// Fast Schlick Fresnel grazing sheen + exact specFactor^22 (zero SFU pow() calls)
+	float oneMinusNV = clamp(1.0 - ndotv, 0.0, 1.0);
+	float f2 = oneMinusNV * oneMinusNV;
+	float fresnel = 0.08 + 0.92 * (f2 * f2 * oneMinusNV);
+
+	float s2 = specFactor * specFactor;
+	float s4 = s2 * s2;
+	float s16 = s4 * s4;
+	float specPeak = s16 * s4 * s2;
+
+	vec4 specTint = base * 0.65 + vec4(0.35);
+	float specAmt = (specPeak * 0.48 * (0.65 + 0.70 * nh.a) + fresnel * diffuse * 0.24) * specMask;
+	vec4 spec = vec4(specAmt) * specTint;
+
+	out_color = (base * vec4(diffuse * microAO * heightMod) + spec) * vec4(intens, 1.0);
 #else
 	// Lambertian diffuse reflection term (N.L)
 	float diffuse = dot(N, nL);

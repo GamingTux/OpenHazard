@@ -1219,7 +1219,8 @@ static void VK_SetLightParams( vkUniform_t *uniform, const dlight_t *dl ) {
 	// vertex data
 	VectorCopy( backEnd.or.viewOrigin, uniform->eyePos );
 	uniform->eyePos[3] = r_normalStrength ? r_normalStrength->value : 1.0f;
-	VectorCopy( dl->transformed, uniform->light.pos ); uniform->light.pos[3] = 0.0f;
+	VectorCopy( dl->transformed, uniform->light.pos );
+	uniform->light.pos[3] = r_normalSpec ? r_normalSpec->value : 1.0f;
 
 	// fragment data
 	uniform->light.color[3] = 1.0f / Square( radius );

@@ -2083,6 +2083,7 @@ static const char *oh_saved_cvar_names[] = {
 	"r_ohClassic",
 	"r_hdTextures",
 	"r_fbo",
+	"r_directPost",
 	"r_gpuAutoTune",
 	"r_ext_multisample",
 	"r_ext_alpha_to_coverage",
@@ -2092,6 +2093,8 @@ static const char *oh_saved_cvar_names[] = {
 	"r_dlightMode",
 	"r_dlightScale",
 	"r_flares",
+	"r_dlightFlares",
+	"r_entityLighting",
 	"r_lodbias",
 	"r_bloom",
 	"r_bloom_downscale",
@@ -2102,6 +2105,8 @@ static const char *oh_saved_cvar_names[] = {
 	"r_normalMapping",
 	"r_hdr",
 	"r_tonemap",
+	"r_dither",
+	"r_vignette",
 	"r_sharpen",
 };
 #define OH_NUM_SAVED_CVARS (int)(sizeof(oh_saved_cvar_names) / sizeof(oh_saved_cvar_names[0]))
@@ -2177,12 +2182,16 @@ static void CL_OpenHazardToggle_f( void ) {
 		Cvar_Set( "r_dlightMode", "0" );
 		Cvar_Set( "r_dlightScale", "0.5" );
 		Cvar_Set( "r_flares", "0" );
+		Cvar_Set( "r_dlightFlares", "0" );
+		Cvar_Set( "r_entityLighting", "0" );
 		Cvar_Set( "r_lodbias", "0" );
 		Cvar_Set( "r_bloom", "0" );
 		Cvar_Set( "r_ssao", "0" );
 		Cvar_Set( "r_normalMapping", "0" );
 		Cvar_Set( "r_hdr", "0" );
 		Cvar_Set( "r_tonemap", "0" );
+		Cvar_Set( "r_dither", "0" );
+		Cvar_Set( "r_vignette", "0" );
 		Cvar_Set( "r_sharpen", "0" );
 		oh_toggle_state.vanillaMode = qtrue;
 
@@ -2201,6 +2210,8 @@ static void CL_OpenHazardToggle_f( void ) {
 		Cvar_Set( "r_dlightMode", "2" );
 		Cvar_Set( "r_dlightScale", "0.9" );
 		Cvar_Set( "r_flares", "1" );
+		Cvar_Set( "r_dlightFlares", "1" );
+		Cvar_Set( "r_entityLighting", "1" );
 		Cvar_Set( "r_lodbias", "-2" );
 		Cvar_Set( "r_bloom", "1" );
 		Cvar_Set( "r_bloom_downscale", "2" );
@@ -2211,6 +2222,8 @@ static void CL_OpenHazardToggle_f( void ) {
 		Cvar_Set( "r_normalMapping", "1" );
 		Cvar_Set( "r_hdr", "1" );
 		Cvar_Set( "r_tonemap", "1" );
+		Cvar_Set( "r_dither", "1" );
+		Cvar_Set( "r_vignette", "0.12" );
 		Cvar_Set( "r_sharpen", "0.25" );
 		oh_toggle_state.vanillaMode = qfalse;
 

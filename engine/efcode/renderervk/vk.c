@@ -908,11 +908,13 @@ static void vk_create_swapchain( VkPhysicalDevice physical_device, VkDevice devi
 
 static void vk_create_render_passes( void )
 {
-	VkAttachmentDescription attachments[3]; // color | depth | msaa color
+	VkAttachmentDescription attachments[4]; // color | depth | msaa color | direct resolved transient
 	VkAttachmentReference colorResolveRef;
 	VkAttachmentReference colorRef0;
 	VkAttachmentReference depthRef0;
-	VkSubpassDescription subpass;
+	VkAttachmentReference colorRef1;
+	VkAttachmentReference inputRef1;
+	VkSubpassDescription subpasses[2];
 	VkSubpassDependency deps[3];
 	VkRenderPassCreateInfo desc;
 	VkFormat depth_format;
@@ -924,19 +926,19 @@ static void vk_create_render_passes( void )
 
 	if ( !vk.fboActive )
 	{
-		// presentation (or direct-to-swapchain MSAA resolve target)
+		// presentation (or direct-to-swapchain MSAA resolve / subpass-1 post-FX target)
 		attachments[0].flags = 0;
 		attachments[0].format = vk.present_format.format;
 		attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
 #ifdef USE_BUFFER_CLEAR
-		attachments[0].loadOp = vk.msaaActive ? VK_ATTACHMENT_LOAD_OP_DONT_CARE : VK_ATTACHMENT_LOAD_OP_CLEAR;
+		attachments[0].loadOp = ( vk.msaaActive || vk.directPostActive ) ? VK_ATTACHMENT_LOAD_OP_DONT_CARE : VK_ATTACHMENT_LOAD_OP_CLEAR;
 #else
 		attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;	// Assuming this will be completely overwritten
 #endif
 		attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;		// needed for presentation
 		attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 		attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-		attachments[0].initialLayout = vk.msaaActive ? VK_IMAGE_LAYOUT_UNDEFINED : vk.initSwapchainLayout;
+		attachments[0].initialLayout = ( vk.msaaActive || vk.directPostActive ) ? VK_IMAGE_LAYOUT_UNDEFINED : vk.initSwapchainLayout;
 		attachments[0].finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 	}
 	else
@@ -982,18 +984,18 @@ static void vk_create_render_passes( void )
 	depthRef0.attachment = 1;
 	depthRef0.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
-	Com_Memset( &subpass, 0, sizeof( subpass ) );
-	subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-	subpass.colorAttachmentCount = 1;
-	subpass.pColorAttachments = &colorRef0;
-	subpass.pDepthStencilAttachment = &depthRef0;
+	Com_Memset( subpasses, 0, sizeof( subpasses ) );
+	subpasses[0].pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+	subpasses[0].colorAttachmentCount = 1;
+	subpasses[0].pColorAttachments = &colorRef0;
+	subpasses[0].pDepthStencilAttachment = &depthRef0;
 
 	Com_Memset( &desc, 0, sizeof( desc ) );
 	desc.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
 	desc.pNext = NULL;
 	desc.flags = 0;
 	desc.pAttachments = attachments;
-	desc.pSubpasses = &subpass;
+	desc.pSubpasses = subpasses;
 
 	desc.subpassCount = 1;
 	desc.attachmentCount = 2;
@@ -1026,7 +1028,54 @@ static void vk_create_render_passes( void )
 		colorResolveRef.attachment = 0; // resolve image attachment
 		colorResolveRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
-		subpass.pResolveAttachments = &colorResolveRef;
+		subpasses[0].pResolveAttachments = &colorResolveRef;
+	}
+
+	// Direct-to-swapchain on-chip subpass post-FX (Filmic Tonemap, Dither, Vignette, Gamma/Overbright):
+	// Subpass 0 writes/resolves into a transient 1x color attachment; Subpass 1 reads it via
+	// subpassLoad() with VK_DEPENDENCY_BY_REGION_BIT (tile-local on TBDR GPUs like VideoCore VII)
+	// and writes directly to the swapchain attachment (att 0).
+	if ( !vk.fboActive && vk.directPostActive )
+	{
+		uint32_t directIdx = vk.msaaActive ? 3u : 2u;
+
+		attachments[directIdx].flags = 0;
+		attachments[directIdx].format = vk.present_format.format;
+		attachments[directIdx].samples = VK_SAMPLE_COUNT_1_BIT;
+#ifdef USE_BUFFER_CLEAR
+		attachments[directIdx].loadOp = vk.msaaActive ? VK_ATTACHMENT_LOAD_OP_DONT_CARE : VK_ATTACHMENT_LOAD_OP_CLEAR;
+#else
+		attachments[directIdx].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+#endif
+		attachments[directIdx].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+		attachments[directIdx].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+		attachments[directIdx].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+		attachments[directIdx].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		attachments[directIdx].finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+		desc.attachmentCount = directIdx + 1;
+		desc.subpassCount = 2;
+
+		if ( vk.msaaActive ) {
+			colorResolveRef.attachment = directIdx;
+			colorResolveRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+		} else {
+			colorRef0.attachment = directIdx;
+			colorRef0.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+		}
+
+		inputRef1.attachment = directIdx;
+		inputRef1.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+		colorRef1.attachment = 0; // swapchain presentation attachment
+		colorRef1.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+		subpasses[1].pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+		subpasses[1].inputAttachmentCount = 1;
+		subpasses[1].pInputAttachments = &inputRef1;
+		subpasses[1].colorAttachmentCount = 1;
+		subpasses[1].pColorAttachments = &colorRef1;
+		subpasses[1].pDepthStencilAttachment = NULL;
 	}
 
 	// subpass dependencies
@@ -1043,8 +1092,37 @@ static void vk_create_render_passes( void )
 
 	if ( !vk.fboActive )
 	{
-		desc.dependencyCount = 1;
-		desc.pDependencies = &deps[2];
+		if ( vk.directPostActive )
+		{
+			// [0]: EXTERNAL -> 0 (transient/depth reuse)
+			deps[0] = deps[2];
+
+			// [1]: 0 -> 1 (tile-local BY_REGION dependency for on-chip subpassLoad)
+			deps[1].srcSubpass = 0;
+			deps[1].dstSubpass = 1;
+			deps[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+			deps[1].dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+			deps[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+			deps[1].dstAccessMask = VK_ACCESS_INPUT_ATTACHMENT_READ_BIT;
+			deps[1].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+
+			// [2]: EXTERNAL -> 1 (synchronizes swapchain image acquire before subpass 1 writes att 0)
+			deps[2].srcSubpass = VK_SUBPASS_EXTERNAL;
+			deps[2].dstSubpass = 1;
+			deps[2].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+			deps[2].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+			deps[2].srcAccessMask = 0;
+			deps[2].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+			deps[2].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+
+			desc.dependencyCount = 3;
+			desc.pDependencies = deps;
+		}
+		else
+		{
+			desc.dependencyCount = 1;
+			desc.pDependencies = &deps[2];
+		}
 
 		VK_CHECK( qvkCreateRenderPass( device, &desc, NULL, &vk.render_pass.main ) );
 		SET_OBJECT_NAME( vk.render_pass.main, "render pass - main", VK_DEBUG_REPORT_OBJECT_TYPE_RENDER_PASS_EXT );
@@ -1097,10 +1175,10 @@ static void vk_create_render_passes( void )
 		colorRef0.attachment = 0;
 		colorRef0.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
-		Com_Memset( &subpass, 0, sizeof( subpass ) );
-		subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-		subpass.colorAttachmentCount = 1;
-		subpass.pColorAttachments = &colorRef0;	// no depth, no resolve, single-sample
+		Com_Memset( &subpasses[0], 0, sizeof( subpasses[0] ) );
+		subpasses[0].pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+		subpasses[0].colorAttachmentCount = 1;
+		subpasses[0].pColorAttachments = &colorRef0;	// no depth, no resolve, single-sample
 
 		desc.attachmentCount = 1;	// att0 only
 
@@ -1114,10 +1192,10 @@ static void vk_create_render_passes( void )
 		colorRef0.attachment = 0;
 		colorRef0.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
-		Com_Memset( &subpass, 0, sizeof( subpass ) );
-		subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-		subpass.colorAttachmentCount = 1;
-		subpass.pColorAttachments = &colorRef0;
+		Com_Memset( &subpasses[0], 0, sizeof( subpasses[0] ) );
+		subpasses[0].pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+		subpasses[0].colorAttachmentCount = 1;
+		subpasses[0].pColorAttachments = &colorRef0;
 
 		attachments[0].flags = 0;
 		attachments[0].format = vk.ssao_format;
@@ -1141,10 +1219,10 @@ static void vk_create_render_passes( void )
 		colorRef0.attachment = 0;
 		colorRef0.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
-		Com_Memset( &subpass, 0, sizeof( subpass ) );
-		subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-		subpass.colorAttachmentCount = 1;
-		subpass.pColorAttachments = &colorRef0;
+		Com_Memset( &subpasses[0], 0, sizeof( subpasses[0] ) );
+		subpasses[0].pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+		subpasses[0].colorAttachmentCount = 1;
+		subpasses[0].pColorAttachments = &colorRef0;
 
 		attachments[0].flags = 0;
 		attachments[0].format = vk.bloom_format;
@@ -1169,7 +1247,7 @@ static void vk_create_render_passes( void )
 	// capture render pass
 	if ( vk.capture.image )
 	{
-		Com_Memset( &subpass, 0, sizeof( subpass ) );
+		Com_Memset( &subpasses[0], 0, sizeof( subpasses[0] ) );
 
 		attachments[0].flags = 0;
 		attachments[0].format = vk.capture_format;
@@ -1184,16 +1262,16 @@ static void vk_create_render_passes( void )
 		colorRef0.attachment = 0;
 		colorRef0.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
-		subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-		subpass.colorAttachmentCount = 1;
-		subpass.pColorAttachments = &colorRef0;
+		subpasses[0].pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+		subpasses[0].colorAttachmentCount = 1;
+		subpasses[0].pColorAttachments = &colorRef0;
 
 		desc.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
 		desc.pNext = NULL;
 		desc.flags = 0;
 		desc.pAttachments = attachments;
 		desc.attachmentCount = 1;
-		desc.pSubpasses = &subpass;
+		desc.pSubpasses = &subpasses[0];
 		desc.subpassCount = 1;
 
 		VK_CHECK( qvkCreateRenderPass( device, &desc, NULL, &vk.render_pass.capture ) );
@@ -1205,10 +1283,10 @@ static void vk_create_render_passes( void )
 
 	desc.attachmentCount = 1;
 
-	Com_Memset( &subpass, 0, sizeof( subpass ) );
-	subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-	subpass.colorAttachmentCount = 1;
-	subpass.pColorAttachments = &colorRef0;
+	Com_Memset( &subpasses[0], 0, sizeof( subpasses[0] ) );
+	subpasses[0].pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+	subpasses[0].colorAttachmentCount = 1;
+	subpasses[0].pColorAttachments = &colorRef0;
 
 	// gamma post-processing
 	attachments[0].flags = 0;
@@ -1266,18 +1344,18 @@ static void vk_create_render_passes( void )
 	depthRef0.attachment = 1;
 	depthRef0.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
-	Com_Memset( &subpass, 0, sizeof( subpass ) );
-	subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-	subpass.colorAttachmentCount = 1;
-	subpass.pColorAttachments = &colorRef0;
-	subpass.pDepthStencilAttachment = &depthRef0;
+	Com_Memset( &subpasses[0], 0, sizeof( subpasses[0] ) );
+	subpasses[0].pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+	subpasses[0].colorAttachmentCount = 1;
+	subpasses[0].pColorAttachments = &colorRef0;
+	subpasses[0].pDepthStencilAttachment = &depthRef0;
 
 	Com_Memset( &desc, 0, sizeof( desc ) );
 	desc.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
 	desc.pNext = NULL;
 	desc.flags = 0;
 	desc.pAttachments = attachments;
-	desc.pSubpasses = &subpass;
+	desc.pSubpasses = &subpasses[0];
 	desc.subpassCount = 1;
 	desc.attachmentCount = 2;
 	desc.dependencyCount = 2;
@@ -1307,7 +1385,7 @@ static void vk_create_render_passes( void )
 		colorResolveRef.attachment = 0; // screenmap resolve image attachment
 		colorResolveRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
-		subpass.pResolveAttachments = &colorResolveRef;
+		subpasses[0].pResolveAttachments = &colorResolveRef;
 	}
 
 	VK_CHECK( qvkCreateRenderPass( device, &desc, NULL, &vk.render_pass.screenmap ) );
@@ -2862,6 +2940,29 @@ void vk_update_attachment_descriptors( void ) {
 			qvkUpdateDescriptorSets( vk.device, 1, &desc, 0, NULL );
 		}
 	}
+
+	if ( vk.direct_color_image_view && vk.direct_color_descriptor != VK_NULL_HANDLE )
+	{
+		VkDescriptorImageInfo info;
+		VkWriteDescriptorSet desc;
+
+		info.sampler = VK_NULL_HANDLE;
+		info.imageView = vk.direct_color_image_view;
+		info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+		desc.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		desc.pNext = NULL;
+		desc.dstSet = vk.direct_color_descriptor;
+		desc.dstBinding = 0;
+		desc.dstArrayElement = 0;
+		desc.descriptorCount = 1;
+		desc.descriptorType = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT;
+		desc.pImageInfo = &info;
+		desc.pBufferInfo = NULL;
+		desc.pTexelBufferView = NULL;
+
+		qvkUpdateDescriptorSets( vk.device, 1, &desc, 0, NULL );
+	}
 }
 
 
@@ -2942,6 +3043,20 @@ void vk_init_descriptors( void )
 
 		alloc.descriptorSetCount = 1;
 		VK_CHECK( qvkAllocateDescriptorSets( vk.device, &alloc, &vk.screenMap.color_descriptor ) ); // screenmap
+
+		vk_update_attachment_descriptors();
+	}
+
+	if ( vk.direct_color_image_view )
+	{
+		alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+		alloc.pNext = NULL;
+		alloc.descriptorPool = vk.descriptor_pool;
+		alloc.descriptorSetCount = 1;
+		alloc.pSetLayouts = &vk.set_layout_input;
+
+		VK_CHECK( qvkAllocateDescriptorSets( vk.device, &alloc, &vk.direct_color_descriptor ) );
+		SET_OBJECT_NAME( vk.direct_color_descriptor, "direct subpass input descriptor", VK_DEBUG_REPORT_OBJECT_TYPE_DESCRIPTOR_SET_EXT );
 
 		vk_update_attachment_descriptors();
 	}
@@ -3378,6 +3493,7 @@ static void vk_create_shader_modules( void )
 
 	vk.modules.gamma_fs = SHADER_MODULE( gamma_frag_spv );
 	vk.modules.gamma_vs = SHADER_MODULE( gamma_vert_spv );
+	vk.modules.direct_post_fs = SHADER_MODULE( direct_post_frag_spv );
 	vk.modules.ssao_fs = SHADER_MODULE( ssao_frag_spv );
 	vk.modules.ssao_ms_fs = SHADER_MODULE( ssao_ms_frag_spv );
 	vk.modules.ssao_blur_fs = SHADER_MODULE( ssao_blur_frag_spv );
@@ -3385,6 +3501,7 @@ static void vk_create_shader_modules( void )
 
 	SET_OBJECT_NAME( vk.modules.gamma_fs, "gamma post-processing fragment module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
 	SET_OBJECT_NAME( vk.modules.gamma_vs, "gamma post-processing vertex module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
+	SET_OBJECT_NAME( vk.modules.direct_post_fs, "direct subpass post-FX fragment module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
 	SET_OBJECT_NAME( vk.modules.ssao_fs, "ssao fragment module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
 	SET_OBJECT_NAME( vk.modules.ssao_ms_fs, "ssao msaa fragment module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
 	SET_OBJECT_NAME( vk.modules.ssao_blur_fs, "ssao bilateral blur fragment module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
@@ -3672,6 +3789,8 @@ static void vk_bloom_base_dims( uint32_t *w, uint32_t *h )
 	*h = bh;
 }
 
+static void vk_destroy_pipelines( qboolean resetCount );
+
 void vk_update_post_process_pipelines( void )
 {
 	if ( vk.fboActive ) {
@@ -3705,6 +3824,23 @@ void vk_update_post_process_pipelines( void )
 
 			vk_create_post_process_pipeline( 2, glConfig.vidWidth, glConfig.vidHeight ); // bloom blending
 		}
+	}
+	if ( vk.directPostActive ) {
+		vk_create_post_process_pipeline( 7, gls.windowWidth, gls.windowHeight ); // direct on-chip subpass post-FX
+	}
+	if ( !vk.fboActive && !vk.directPostActive && vk.pipelines_count > 0 ) {
+		static int last_direct_fx = -1;
+		int cur_direct_fx = 0;
+		if ( !( r_ohClassic && r_ohClassic->integer ) ) {
+			if ( r_tonemap && r_tonemap->integer ) cur_direct_fx |= 1;
+			if ( r_dither && r_dither->integer ) cur_direct_fx |= 2;
+		}
+		if ( last_direct_fx != -1 && cur_direct_fx != last_direct_fx ) {
+			vk_wait_idle();
+			vk_destroy_pipelines( qfalse );
+			vk_prewarm_pipelines();
+		}
+		last_direct_fx = cur_direct_fx;
 	}
 }
 
@@ -3906,7 +4042,7 @@ static void create_color_attachment( uint32_t width, uint32_t height, VkSampleCo
 	VkImageCreateInfo create_desc;
 	VkMemoryRequirements memory_requirements;
 
-	if ( multisample && !( usage & VK_IMAGE_USAGE_SAMPLED_BIT ) )
+	if ( ( multisample && !( usage & VK_IMAGE_USAGE_SAMPLED_BIT ) ) || ( usage & VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT ) )
 		usage |= VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT;
 	else
 		usage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;	// for the one-time init clear in vk_alloc_attachments
@@ -4049,12 +4185,22 @@ static void vk_create_attachments( void )
 
 	if ( vk.msaaActive ) {
 		// Transient: the render pass never stores the multisampled
-		// attachment (it resolves directly into either color_image or the
-		// swapchain image), so it stays tile-local / LAZILY_ALLOCATED on TBDR GPUs.
+		// attachment (it resolves directly into color_image, direct_color_image,
+		// or the swapchain image), so it stays tile-local / LAZILY_ALLOCATED on TBDR GPUs.
 		create_color_attachment( glConfig.vidWidth, glConfig.vidHeight, vkSamples,
 			vk.fboActive ? vk.color_format : vk.present_format.format,
 			VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, &vk.msaa_image, &vk.msaa_image_view, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 			qtrue );
+	}
+
+	if ( vk.directPostActive ) {
+		// Transient 1x scene color attachment read via subpassLoad() in subpass 1
+		// and discarded immediately after (stays on-chip / LAZILY_ALLOCATED on TBDR GPUs).
+		create_color_attachment( gls.windowWidth, gls.windowHeight, VK_SAMPLE_COUNT_1_BIT,
+			vk.present_format.format,
+			VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT,
+			&vk.direct_color_image, &vk.direct_color_image_view, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+			qfalse );
 	}
 
 	//vk_alloc_attachments();
@@ -4104,7 +4250,7 @@ static void vk_create_attachments( void )
 
 static void vk_create_framebuffers( void )
 {
-	VkImageView attachments[3];
+	VkImageView attachments[4];
 	VkFramebufferCreateInfo desc;
 	uint32_t n;
 
@@ -4128,6 +4274,16 @@ static void vk_create_framebuffers( void )
 			{
 				desc.attachmentCount = 3;
 				attachments[2] = vk.msaa_image_view;
+				if ( vk.directPostActive )
+				{
+					desc.attachmentCount = 4;
+					attachments[3] = vk.direct_color_image_view;
+				}
+			}
+			else if ( vk.directPostActive )
+			{
+				desc.attachmentCount = 3;
+				attachments[2] = vk.direct_color_image_view;
 			}
 			VK_CHECK( qvkCreateFramebuffer( vk.device, &desc, NULL, &vk.framebuffers.main[n] ) );
 
@@ -4735,6 +4891,7 @@ void vk_initialize( void )
 	vk_set_render_scale();
 
 	vk.fboActive = r_fbo->integer ? qtrue : qfalse;
+	vk.directPostActive = ( !vk.fboActive && r_directPost && r_directPost->integer ) ? qtrue : qfalse;
 	vk.msaaActive = r_ext_multisample->integer ? qtrue : qfalse;
 	vk.bloomActive = ( vk.fboActive && r_bloom->integer ) ? qtrue : qfalse;
 	vk.bloomDownscale = ( r_bloom_downscale->integer >= 2 ) ? (uint32_t)r_bloom_downscale->integer : 2u;
@@ -5135,7 +5292,7 @@ void vk_initialize( void )
 	// Descriptor pool.
 	//
 	{
-		VkDescriptorPoolSize pool_size[3];
+		VkDescriptorPoolSize pool_size[4];
 		VkDescriptorPoolCreateInfo desc;
 		uint32_t i, maxSets;
 
@@ -5145,11 +5302,11 @@ void vk_initialize( void )
 		pool_size[1].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
 		pool_size[1].descriptorCount = NUM_COMMAND_BUFFERS;
 
-		//pool_size[2].type = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT;
-		//pool_size[2].descriptorCount = NUM_COMMAND_BUFFERS;
-
 		pool_size[2].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC;
 		pool_size[2].descriptorCount = 1;
+
+		pool_size[3].type = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT;
+		pool_size[3].descriptorCount = 2;
 
 		for ( i = 0, maxSets = 0; i < ARRAY_LEN( pool_size ); i++ ) {
 			maxSets += pool_size[i].descriptorCount;
@@ -5171,7 +5328,7 @@ void vk_initialize( void )
 	vk_create_layout_binding( 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, &vk.set_layout_sampler );
 	vk_create_layout_binding( 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, &vk.set_layout_uniform );
 	vk_create_layout_binding( 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, &vk.set_layout_storage );
-	//vk_create_layout_binding( 0, VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, VK_SHADER_STAGE_FRAGMENT_BIT, &vk.set_layout_input );
+	vk_create_layout_binding( 0, VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, VK_SHADER_STAGE_FRAGMENT_BIT, &vk.set_layout_input );
 
 	//
 	// Pipeline layouts.
@@ -5248,6 +5405,17 @@ void vk_initialize( void )
 			desc.pPushConstantRanges = &ssao_push;
 			VK_CHECK( qvkCreatePipelineLayout( vk.device, &desc, NULL, &vk.pipeline_layout_ssao ) );
 			SET_OBJECT_NAME( vk.pipeline_layout_ssao, "pipeline layout - ssao", VK_DEBUG_REPORT_OBJECT_TYPE_PIPELINE_LAYOUT_EXT );
+		}
+
+		// Direct on-chip subpass post-FX pipeline layout: 1 subpass input attachment
+		{
+			set_layouts[0] = vk.set_layout_input;
+			desc.setLayoutCount = 1;
+			desc.pSetLayouts = set_layouts;
+			desc.pushConstantRangeCount = 0;
+			desc.pPushConstantRanges = NULL;
+			VK_CHECK( qvkCreatePipelineLayout( vk.device, &desc, NULL, &vk.pipeline_layout_direct_post ) );
+			SET_OBJECT_NAME( vk.pipeline_layout_direct_post, "pipeline layout - direct post-FX", VK_DEBUG_REPORT_OBJECT_TYPE_PIPELINE_LAYOUT_EXT );
 		}
 
 		SET_OBJECT_NAME( vk.pipeline_layout, "pipeline layout - main", VK_DEBUG_REPORT_OBJECT_TYPE_PIPELINE_LAYOUT_EXT );
@@ -5343,6 +5511,13 @@ static void vk_destroy_attachments( void )
 		qvkDestroyImageView( vk.device, vk.color_image_view, NULL );
 		vk.color_image = VK_NULL_HANDLE;
 		vk.color_image_view = VK_NULL_HANDLE;
+	}
+
+	if ( vk.direct_color_image ) {
+		qvkDestroyImage( vk.device, vk.direct_color_image, NULL );
+		qvkDestroyImageView( vk.device, vk.direct_color_image_view, NULL );
+		vk.direct_color_image = VK_NULL_HANDLE;
+		vk.direct_color_image_view = VK_NULL_HANDLE;
 	}
 
 	if ( vk.msaa_image ) {
@@ -5480,6 +5655,11 @@ static void vk_destroy_pipelines( qboolean resetCounter )
 		vk.gamma_pipeline = VK_NULL_HANDLE;
 	}
 
+	if ( vk.direct_post_pipeline ) {
+		qvkDestroyPipeline( vk.device, vk.direct_post_pipeline, NULL );
+		vk.direct_post_pipeline = VK_NULL_HANDLE;
+	}
+
 	if ( vk.capture_pipeline ) {
 		qvkDestroyPipeline( vk.device, vk.capture_pipeline, NULL );
 		vk.capture_pipeline = VK_NULL_HANDLE;
@@ -5549,12 +5729,14 @@ void vk_shutdown( refShutdownCode_t code )
 	qvkDestroyDescriptorSetLayout(vk.device, vk.set_layout_sampler, NULL);
 	qvkDestroyDescriptorSetLayout(vk.device, vk.set_layout_uniform, NULL);
 	qvkDestroyDescriptorSetLayout(vk.device, vk.set_layout_storage, NULL);
+	qvkDestroyDescriptorSetLayout(vk.device, vk.set_layout_input, NULL);
 
 	qvkDestroyPipelineLayout(vk.device, vk.pipeline_layout, NULL);
 	qvkDestroyPipelineLayout(vk.device, vk.pipeline_layout_storage, NULL);
 	qvkDestroyPipelineLayout(vk.device, vk.pipeline_layout_post_process, NULL);
 	qvkDestroyPipelineLayout(vk.device, vk.pipeline_layout_blend, NULL);
 	qvkDestroyPipelineLayout(vk.device, vk.pipeline_layout_ssao, NULL);
+	qvkDestroyPipelineLayout(vk.device, vk.pipeline_layout_direct_post, NULL);
 
 #ifdef USE_VBO
 	vk_release_vbo();
@@ -5670,6 +5852,7 @@ void vk_shutdown( refShutdownCode_t code )
 
 	qvkDestroyShaderModule(vk.device, vk.modules.gamma_vs, NULL);
 	qvkDestroyShaderModule(vk.device, vk.modules.gamma_fs, NULL);
+	qvkDestroyShaderModule(vk.device, vk.modules.direct_post_fs, NULL);
 	qvkDestroyShaderModule(vk.device, vk.modules.ssao_fs, NULL);
 	qvkDestroyShaderModule(vk.device, vk.modules.ssao_ms_fs, NULL);
 	qvkDestroyShaderModule(vk.device, vk.modules.ssao_blur_fs, NULL);
@@ -6274,7 +6457,7 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 	VkGraphicsPipelineCreateInfo create_info;
 	VkViewport viewport;
 	VkRect2D scissor;
-	VkSpecializationMapEntry spec_entries[14];
+	VkSpecializationMapEntry spec_entries[15];
 	VkSpecializationInfo frag_spec_info;
 	VkPipeline *pipeline;
 	VkShaderModule fsmodule;
@@ -6282,6 +6465,7 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 	VkPipelineLayout layout;
 	VkSampleCountFlagBits samples;
 	const char *pipeline_name;
+	uint32_t subpass = 0;
 	int blend;
 
 	struct FragSpecData {
@@ -6299,6 +6483,7 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 		int tonemap;
 		float sharpen;
 		float ssao_intensity;
+		float vignette;
 	} frag_spec_data;
 
 	switch ( program_index ) {
@@ -6356,6 +6541,16 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 			pipeline_name = "ssao blend pipeline";
 			blend = 2;
 			break;
+		case 7: // Direct on-chip subpass post-FX (Filmic Tonemap, Dither, Vignette, Gamma/Overbright)
+			pipeline = &vk.direct_post_pipeline;
+			fsmodule = vk.modules.direct_post_fs;
+			renderpass = vk.render_pass.main;
+			layout = vk.pipeline_layout_direct_post;
+			samples = VK_SAMPLE_COUNT_1_BIT;
+			pipeline_name = "direct subpass post-FX pipeline";
+			subpass = 1;
+			blend = 0;
+			break;
 		default: // gamma correction (+ optional filmic tonemap & CAS sharpen)
 			pipeline = &vk.gamma_pipeline;
 			fsmodule = vk.modules.gamma_fs;
@@ -6392,10 +6587,11 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 	frag_spec_data.bloom_intensity = r_bloom_intensity->value;
 	frag_spec_data.bloom_threshold_mode = r_bloom_threshold_mode->integer;
 	frag_spec_data.bloom_modulate = r_bloom_modulate->integer;
-	frag_spec_data.dither = r_dither->integer;
+	frag_spec_data.dither = ( r_dither && !( r_ohClassic && r_ohClassic->integer ) ) ? r_dither->integer : 0;
 	frag_spec_data.tonemap = ( r_tonemap && !( r_ohClassic && r_ohClassic->integer ) ) ? r_tonemap->integer : 0;
 	frag_spec_data.sharpen = ( r_sharpen && !( r_ohClassic && r_ohClassic->integer ) ) ? Com_Clamp( 0.0f, 1.0f, r_sharpen->value ) : 0.0f;
 	frag_spec_data.ssao_intensity = r_ssao_intensity ? Com_Clamp( 0.1f, 1.5f, r_ssao_intensity->value ) : 0.75f;
+	frag_spec_data.vignette = ( r_vignette && !( r_ohClassic && r_ohClassic->integer ) ) ? Com_Clamp( 0.0f, 0.5f, r_vignette->value ) : 0.0f;
 
 	if ( !vk_surface_format_color_depth( vk.present_format.format, &frag_spec_data.depth_r, &frag_spec_data.depth_g, &frag_spec_data.depth_b ) )
 		ri.Printf( PRINT_ALL, "Format %s not recognized, dither to assume 8bpc\n", vk_format_string( vk.base_format.format ) );
@@ -6456,7 +6652,11 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 	spec_entries[13].offset = offsetof(struct FragSpecData, ssao_intensity);
 	spec_entries[13].size = sizeof(frag_spec_data.ssao_intensity);
 
-	frag_spec_info.mapEntryCount = 14;
+	spec_entries[14].constantID = 14;
+	spec_entries[14].offset = offsetof(struct FragSpecData, vignette);
+	spec_entries[14].size = sizeof(frag_spec_data.vignette);
+
+	frag_spec_info.mapEntryCount = 15;
 	frag_spec_info.pMapEntries = spec_entries;
 	frag_spec_info.dataSize = sizeof( frag_spec_data );
 	frag_spec_info.pData = &frag_spec_data;
@@ -6597,7 +6797,7 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 	create_info.pDynamicState = NULL;
 	create_info.layout = layout;
 	create_info.renderPass = renderpass;
-	create_info.subpass = 0;
+	create_info.subpass = subpass;
 	create_info.basePipelineHandle = VK_NULL_HANDLE;
 	create_info.basePipelineIndex = -1;
 
@@ -6803,8 +7003,8 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 	VkShaderModule *vs_module = NULL;
 	VkShaderModule *fs_module = NULL;
 	//int32_t vert_spec_data[1]; // clippping
-	floatint_t frag_spec_data[11]; // 0:alpha-test-func, 1:alpha-test-value, 2:depth-fragment, 3:alpha-to-coverage, 4:color_mode, 5:abs_light, 6:multitexture mode, 7:discard mode, 8: ident.color, 9 - ident.alpha, 10 - acff
-	VkSpecializationMapEntry spec_entries[12];
+	floatint_t frag_spec_data[12]; // 0:alpha-test-func, 1:alpha-test-value, 2:depth-fragment, 3:alpha-to-coverage, 4:color_mode, 5:abs_light, 6:multitexture mode, 7:discard mode, 8: ident.color, 9 - ident.alpha, 10 - acff, 11 - direct_fx
+	VkSpecializationMapEntry spec_entries[13];
 	//VkSpecializationInfo vert_spec_info;
 	VkSpecializationInfo frag_spec_info;
 	VkPipelineVertexInputStateCreateInfo vertex_input_state;
@@ -7194,6 +7394,18 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 		frag_spec_data[10].i = 0;
 	}
 
+	// Zero-subpass Direct-mode Filmic Tonemap + IGN Anti-Banding Dither on opaque 3D surfaces:
+	// avoids the ~8 ms MSAA-resolve tile split of a 2nd subpass on VideoCore VII.
+	frag_spec_data[11].i = 0;
+	if ( !vk.fboActive && !vk.directPostActive
+		&& !( r_ohClassic && r_ohClassic->integer )
+		&& !( state_bits & ( GLS_SRCBLEND_BITS | GLS_DSTBLEND_BITS | GLS_DEPTHTEST_DISABLE ) ) ) {
+		if ( r_tonemap && r_tonemap->integer )
+			frag_spec_data[11].i |= 1;
+		if ( r_dither && r_dither->integer )
+			frag_spec_data[11].i |= 2;
+	}
+
 	//
 	// vertex module specialization data
 	//
@@ -7258,9 +7470,13 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 	spec_entries[11].offset = 10 * sizeof( int32_t );
 	spec_entries[11].size = sizeof( int32_t );
 
-	frag_spec_info.mapEntryCount = 11;
+	spec_entries[12].constantID = 11; // direct_fx (zero-subpass filmic tonemap + IGN dither)
+	spec_entries[12].offset = 11 * sizeof( int32_t );
+	spec_entries[12].size = sizeof( int32_t );
+
+	frag_spec_info.mapEntryCount = 12;
 	frag_spec_info.pMapEntries = spec_entries + 1;
-	frag_spec_info.dataSize = sizeof( int32_t ) * 11;
+	frag_spec_info.dataSize = sizeof( int32_t ) * 12;
 	frag_spec_info.pData = &frag_spec_data[0];
 	shader_stages[1].pSpecializationInfo = &frag_spec_info;
 
@@ -8628,7 +8844,7 @@ void vk_draw_dot( uint32_t storage_offset )
 static void vk_begin_render_pass( VkRenderPass renderPass, VkFramebuffer frameBuffer, qboolean clearValues, uint32_t width, uint32_t height )
 {
 	VkRenderPassBeginInfo render_pass_begin_info;
-	VkClearValue clear_values[3];
+	VkClearValue clear_values[4];
 
 	// Begin render pass.
 
@@ -8645,20 +8861,19 @@ static void vk_begin_render_pass( VkRenderPass renderPass, VkFramebuffer frameBu
 		// attachments layout:
 		// [0] - resolve/color/presentation
 		// [1] - depth/stencil
-		// [2] - multisampled color, optional
+		// [2] - multisampled color or transient direct color, optional
+		// [3] - transient resolved direct color, optional
 		Com_Memset( clear_values, 0, sizeof( clear_values ) );
 		// clear color alpha to 1.0 like the GL renderers do — shaders using
 		// destination-alpha blends should see opaque where nothing was drawn
 		clear_values[0].color.float32[3] = 1.0f;
 		clear_values[2].color.float32[3] = 1.0f;
+		clear_values[3].color.float32[3] = 1.0f;
 #ifndef USE_REVERSED_DEPTH
 		clear_values[1].depthStencil.depth = 1.0;
 #endif
-		// always 3, not (msaaActive ? 3 : 2): the screenmap pass is ALWAYS
-		// multisampled regardless of r_ext_multisample, so its clear at index 2
-		// needs a defined value even when vk.msaaActive is false (VUID-00902).
-		// Extra entries beyond a pass's attachment count are ignored by spec.
-		render_pass_begin_info.clearValueCount = 3;
+		// Always 4: extra entries beyond a render pass's attachment count are ignored by spec.
+		render_pass_begin_info.clearValueCount = 4;
 		render_pass_begin_info.pClearValues = clear_values;
 
 		vk_world.dirty_depth_attachment = 0;
@@ -9003,6 +9218,7 @@ void vk_end_frame( void )
 				( r_dither->integer == 0 ) &&
 				( r_tonemap->integer == 0 || ( r_ohClassic && r_ohClassic->integer ) ) &&
 				( fabsf( r_sharpen->value ) < 1e-4f || ( r_ohClassic && r_ohClassic->integer ) ) &&
+				( !r_vignette || fabsf( r_vignette->value ) < 1e-4f || ( r_ohClassic && r_ohClassic->integer ) ) &&
 				( r_renderScale->integer == 0 ) &&
 				( vk.swapchainCanTransferDst ) &&
 				( vk.color_format == vk.present_format.format ) &&
@@ -9097,6 +9313,13 @@ void vk_end_frame( void )
 				qvkCmdDraw( vk.cmd->command_buffer, 4, 1, 0, 0 );
 			}
 		}
+	}
+
+	if ( !vk.fboActive && vk.directPostActive && !renderPassEnded && vk.renderPassIndex == RENDER_PASS_MAIN && vk.direct_post_pipeline != VK_NULL_HANDLE ) {
+		qvkCmdNextSubpass( vk.cmd->command_buffer, VK_SUBPASS_CONTENTS_INLINE );
+		qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.direct_post_pipeline );
+		qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_direct_post, 0, 1, &vk.direct_color_descriptor, 0, NULL );
+		qvkCmdDraw( vk.cmd->command_buffer, 4, 1, 0, 0 );
 	}
 
 	if ( !renderPassEnded ) {

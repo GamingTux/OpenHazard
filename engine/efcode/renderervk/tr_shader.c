@@ -4604,6 +4604,24 @@ static void CreateExternalShaders( void ) {
 		}
 	}
 
+	// Hardware depth-tested additive corona shader for zero-stall dynamic light halos (r_dlightFlares)
+	{
+		image_t *coronaImg = tr.whiteImage;
+		if ( !tr.flareShader->defaultShader && tr.flareShader->stages[0] && tr.flareShader->stages[0]->bundle[0].image[0] ) {
+			coronaImg = tr.flareShader->stages[0]->bundle[0].image[0];
+		}
+		InitShader( "<dlightCorona>", LIGHTMAP_NONE );
+		shader.cullType = CT_TWO_SIDED;
+		shader.sort = SS_BLEND1;
+		stages[0].bundle[0].image[0] = coronaImg;
+		stages[0].bundle[0].tcGen = TCGEN_TEXTURE;
+		stages[0].bundle[0].rgbGen = CGEN_EXACT_VERTEX;
+		stages[0].bundle[0].alphaGen = AGEN_VERTEX;
+		stages[0].active = qtrue;
+		stages[0].stateBits = GLS_SRCBLEND_ONE | GLS_DSTBLEND_ONE;
+		tr.dlightCoronaShader = FinishShader();
+	}
+
 	tr.sunShader = R_FindShader( "sun", LIGHTMAP_NONE, qtrue );
 }
 

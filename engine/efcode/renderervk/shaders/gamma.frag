@@ -16,27 +16,14 @@ layout(constant_id = 9) const int depth_g = 255;
 layout(constant_id = 10) const int depth_b = 255;
 layout(constant_id = 11) const int tonemapMode = 0;      // 0 - disabled, 1 - filmic highlight roll-off
 layout(constant_id = 12) const float sharpenStrength = 0.0; // 0.0 - disabled, 0.0..1.0 - FidelityFX CAS
+layout(constant_id = 14) const float vignetteStrength = 0.0; // 0.0 - disabled, 0.0..0.5 - subtle edge vignette
 
 const vec3 sRGB = { 0.2126, 0.7152, 0.0722 };
 
-const int bayerSize = 8;
-const float bayerMatrix[bayerSize * bayerSize] = {
-	0,  32, 8,  40, 2,  34, 10, 42,
-	48, 16, 56, 24, 50, 18, 58, 26,
-	12, 44, 4,  36, 14, 46, 6,  38,
-	60, 28, 52, 20, 62, 30, 54, 22,
-	3,  35, 11, 43, 1,  33, 9,  41,
-	51, 19, 59, 27, 49, 17, 57, 25,
-	15, 47, 7,  39, 13, 45, 5,  37,
-	63, 31, 55, 23, 61, 29, 53, 21
-};
-
+// Zero-array Interleaved Gradient Noise (Jimenez 2014): 3 ALU ops instead of a 64-entry LUT
+// (avoids 35 ms/frame scratch-RAM array spill on VideoCore VII / mobile TBDR GPUs!).
 float threshold() {
-	ivec2 coordDenormalized = ivec2(gl_FragCoord.xy);
-	ivec2 bayerCoord = coordDenormalized % bayerSize;
-	float bayerSample = bayerMatrix[bayerCoord.x + bayerCoord.y * bayerSize];
-	float threshold = (bayerSample + 0.5) / float(bayerSize * bayerSize);
-	return threshold;
+	return fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
 }
 
 vec3 dither(vec3 color) {
@@ -121,6 +108,13 @@ void main() {
 	if ( tonemapMode == 1 )
 	{
 		base = filmicTonemap(base);
+	}
+
+	if ( vignetteStrength > 0.0 )
+	{
+		vec2 vuv = frag_tex_coord * 2.0 - 1.0;
+		float vig = 1.0 - vignetteStrength * smoothstep(0.45, 1.55, dot(vuv, vuv));
+		base *= vig;
 	}
 
 	out_color = vec4(base, 1.0);

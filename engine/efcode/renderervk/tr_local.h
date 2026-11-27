@@ -1347,6 +1347,7 @@ typedef struct {
 	shader_t				*projectionShadowShader;
 
 	shader_t				*flareShader;
+	shader_t				*dlightCoronaShader;
 	shader_t				*sunShader;
 
 	int						numLightmaps;
@@ -1495,6 +1496,10 @@ extern cvar_t	*r_tonemap;
 extern cvar_t	*r_sharpen;
 extern cvar_t	*r_ssao;
 extern cvar_t	*r_ssao_intensity;
+extern cvar_t	*r_directPost;
+extern cvar_t	*r_vignette;
+extern cvar_t	*r_entityLighting;
+extern cvar_t	*r_dlightFlares;
 extern cvar_t	*r_normalMapping;
 extern cvar_t	*r_normalStrength;
 extern cvar_t	*r_normalSpec;

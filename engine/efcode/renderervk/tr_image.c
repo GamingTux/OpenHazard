@@ -2029,7 +2029,7 @@ void R_SetColorMappings( void ) {
 
 	// never overbright in windowed mode
 #ifdef USE_VULKAN
-	if ( !glConfig.isFullscreen && r_overBrightBits->integer >= 0 && !vk.fboActive ) {
+	if ( !glConfig.isFullscreen && r_overBrightBits->integer >= 0 && !vk.fboActive && !vk.directPostActive ) {
 #else
 	if ( !glConfig.isFullscreen && r_overBrightBits->integer >= 0 ) {
 #endif
@@ -2037,7 +2037,7 @@ void R_SetColorMappings( void ) {
 		applyGamma = qfalse;
 	} else {
 #ifdef USE_VULKAN
-		if ( !glConfig.deviceSupportsGamma && !vk.fboActive ) {
+		if ( !glConfig.deviceSupportsGamma && !vk.fboActive && !vk.directPostActive ) {
 #else
 		if ( !glConfig.deviceSupportsGamma ) {
 #endif
@@ -2095,7 +2095,7 @@ void R_SetColorMappings( void ) {
 
 #ifdef USE_VULKAN
 	if ( gls.deviceSupportsGamma ) {
-		if ( vk.fboActive )
+		if ( vk.fboActive || vk.directPostActive )
 			ri.GLimp_SetGamma( s_gammatable_linear, s_gammatable_linear, s_gammatable_linear );
 		else {
 			if ( applyGamma ) {

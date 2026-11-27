@@ -104,6 +104,10 @@ layout (constant_id = 9) const float identity_alpha = 1.0;
 layout (constant_id = 10) const int acff = 0; // NONE, RGB, RGBA, ALPHA
 #endif
 
+#ifndef USE_DF
+layout (constant_id = 11) const int direct_fx = 0; // bit 0: filmic S-curve + shoulder, bit 1: IGN anti-banding dither
+#endif
+
 #ifdef USE_ATEST
 #if 0
 float CorrectAlpha(float threshold, float alpha, vec2 tc)
@@ -507,16 +511,18 @@ void main() {
 		float slope = nxy.x * 0.36 + nxy.y * 0.93;
 		float relief = clamp(1.0 + slope * 1.15, 0.38, 1.85);
 
-		// 2. Crevice Micro-AO: flat surfaces (~0.88..1.0) stay at 1.0, panel seams & grooves darken cleanly
+		// 2. Crevice Micro-AO (nh.b) + Frankot-Chellappa heightmap micro-depth (nh.a, already fetched!):
+		//    Flat surfaces (~0.88..1.0 AO, ~0.5 height) stay neutral; raised bevels catch light, seams deepen.
 		float ao = mix(1.0, clamp(nh.b * 1.14, 0.28, 1.0), clamp(0.80 * nmStrength, 0.0, 0.92));
+		float heightShade = clamp(1.0 + (nh.a - 0.5) * 0.42 * nmStrength, 0.78, 1.22);
 
-		base.rgb *= (relief * ao);
+		base.rgb *= (relief * ao * heightShade);
 #if defined(USE_TX1) || (!defined(USE_CLX_IDENT) && !defined(USE_FIXED_COLOR) && !defined(USE_ENT_COLOR))
-		// 3. Fast metallic bevel glint tinted by actual baked/entity illumination (dark corners stay dark)
+		// 3. Fast height-gated metallic bevel glint tinted by actual baked/entity illumination (dark corners stay dark)
 		float bevel = clamp(slope, 0.0, 1.0);
-		float glint = bevel * bevel * lightPos.w * ao;
+		float glint = bevel * bevel * lightPos.w * ao * (0.55 + 0.90 * nh.a);
 		float specMask = 0.30 + 0.70 * clamp(dot(color0.rgb, vec3(0.299, 0.587, 0.114)), 0.0, 1.0);
-		base.rgb += (nm_light * 0.65 + base.rgb * 0.35) * (glint * specMask * 0.36);
+		base.rgb += (nm_light * 0.65 + base.rgb * 0.35) * (glint * specMask * 0.34);
 #endif
 	}
 #endif
@@ -553,6 +559,18 @@ void main() {
 
 	gl_FragDepth = gl_FragCoord.z;
 #else
+	if ( (direct_fx & 1) != 0 ) {
+		// Zero-subpass Direct Filmic S-curve contrast + smooth highlight roll-off (pure MADs, zero pow/sqrt!)
+		vec3 cl = clamp(base.rgb, 0.0, 1.0);
+		base.rgb = mix(base.rgb, cl * cl * (3.0 - 2.0 * cl), 0.18);
+		vec3 over = max(base.rgb - vec3(0.76), vec3(0.0));
+		base.rgb -= over * over * 0.45;
+	}
+	if ( (direct_fx & 2) != 0 ) {
+		// 3-instruction Interleaved Gradient Noise anti-banding dither (zero array spill on VideoCore VII)
+		float ign = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+		base.rgb += (ign - 0.5) * (1.0 / 255.0);
+	}
 	out_color = base;
 #endif
 }

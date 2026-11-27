@@ -226,6 +226,9 @@ void RB_AddDlightFlares( void ) {
 	if ( !r_flares->integer ) {
 		return;
 	}
+	if ( !r_dlightFlares || !r_dlightFlares->integer || ( r_ohClassic && r_ohClassic->integer ) ) {
+		return;
+	}
 
 	l = backEnd.refdef.dlights;
 
@@ -233,6 +236,34 @@ void RB_AddDlightFlares( void ) {
 		fog = tr.world->fogs;
 
 	for ( i = 0 ; i < backEnd.refdef.num_dlights; i++, l++ ) {
+		vec3_t delta, scaledColor;
+		float dist, camFade, radScale;
+
+		if ( l->radius < 20.0f ) {
+			continue;
+		}
+
+		// Fade out very close dynamic lights (e.g. player's own muzzle flash) so they never obscure the crosshair
+		VectorSubtract( l->origin, backEnd.viewParms.or.origin, delta );
+		dist = VectorLength( delta );
+		if ( dist < 32.0f ) {
+			continue;
+		}
+		camFade = ( dist < 72.0f ) ? ( ( dist - 32.0f ) * ( 1.0f / 40.0f ) ) : 1.0f;
+
+		radScale = l->radius * ( 1.0f / 260.0f );
+		if ( radScale < 0.25f ) radScale = 0.25f;
+		else if ( radScale > 1.0f ) radScale = 1.0f;
+
+		scaledColor[0] = l->color[0] * ( 0.45f * radScale * camFade );
+		scaledColor[1] = l->color[1] * ( 0.45f * radScale * camFade );
+		scaledColor[2] = l->color[2] * ( 0.45f * radScale * camFade );
+		if ( scaledColor[0] > 0.72f ) scaledColor[0] = 0.72f;
+		if ( scaledColor[1] > 0.72f ) scaledColor[1] = 0.72f;
+		if ( scaledColor[2] > 0.72f ) scaledColor[2] = 0.72f;
+		if ( scaledColor[0] + scaledColor[1] + scaledColor[2] < 0.04f ) {
+			continue;
+		}
 
 		if ( fog )
 		{
@@ -255,7 +286,7 @@ void RB_AddDlightFlares( void ) {
 		else
 			j = 0;
 
-		RB_AddFlare( (void *)l, j, l->origin, l->color, NULL );
+		RB_AddFlare( (void *)l, j, l->origin, scaledColor, NULL );
 	}
 }
 
@@ -476,6 +507,109 @@ when occluded by something in the main view, and portal flares that should
 extend past the portal edge will be overwritten.
 ==================
 */
+/*
+==================
+RB_RenderDlightCoronas
+
+Renders soft additive glow halos ("zero-FBO pseudo-bloom") around dynamic lights
+in a SINGLE batched world-space hardware depth-tested draw call (no vk.dot_pipeline
+SSBO fragment-write stall, no 1-frame lag, true Z-occlusion against walls/doors).
+==================
+*/
+static void RB_RenderDlightCoronas( void ) {
+	const dlight_t *l;
+	int i, drawn = 0;
+
+	if ( !r_flares->integer || !r_dlightFlares || !r_dlightFlares->integer ) {
+		return;
+	}
+	if ( r_ohClassic && r_ohClassic->integer ) {
+		return;
+	}
+	if ( !tr.dlightCoronaShader || backEnd.refdef.num_dlights <= 0 ) {
+		return;
+	}
+	if ( vk.renderPassIndex == RENDER_PASS_SCREENMAP || backEnd.isHyperspace ) {
+		return;
+	}
+
+	backEnd.currentEntity = &tr.worldEntity;
+	backEnd.or = backEnd.viewParms.world;
+
+	// Restore world-space perspective MVP (RB_ShadowFinish may have bound ortho)
+	Com_Memcpy( vk_world.modelview_transform, backEnd.viewParms.world.modelMatrix, sizeof( vk_world.modelview_transform ) );
+	vk_update_mvp( NULL );
+
+	l = backEnd.refdef.dlights;
+	for ( i = 0; i < backEnd.refdef.num_dlights; i++, l++ ) {
+		vec3_t toCam, center, left, up;
+		float dist, invDist, camFade, radScale, size, scale, nudge;
+		color4ub_t c;
+		int r, g, b;
+
+		if ( l->radius < 24.0f ) {
+			continue;
+		}
+
+		VectorSubtract( backEnd.viewParms.or.origin, l->origin, toCam );
+		dist = VectorLength( toCam );
+		if ( dist < 36.0f ) {
+			continue; // never blind the crosshair on player's own muzzle flash
+		}
+		// Skip lights behind the camera
+		if ( DotProduct( toCam, backEnd.viewParms.or.axis[0] ) >= 0.0f ) {
+			continue;
+		}
+
+		camFade = ( dist < 84.0f ) ? ( ( dist - 36.0f ) * ( 1.0f / 48.0f ) ) : 1.0f;
+		radScale = l->radius * ( 1.0f / 260.0f );
+		if ( radScale < 0.28f ) radScale = 0.28f;
+		else if ( radScale > 1.0f ) radScale = 1.0f;
+
+		scale = 0.36f * radScale * camFade;
+		r = (int)( l->color[0] * scale * 255.0f );
+		g = (int)( l->color[1] * scale * 255.0f );
+		b = (int)( l->color[2] * scale * 255.0f );
+		if ( r > 185 ) r = 185;
+		if ( g > 185 ) g = 185;
+		if ( b > 185 ) b = 185;
+		if ( r + g + b < 10 ) {
+			continue;
+		}
+
+		if ( !drawn ) {
+			RB_BeginSurface( tr.dlightCoronaShader, 0 );
+			drawn = 1;
+		}
+
+		// Pull billboard center slightly toward camera so lights near walls/fixtures don't Z-clip
+		invDist = 1.0f / dist;
+		nudge = ( dist * 0.22f < 14.0f ) ? ( dist * 0.22f ) : 14.0f;
+		center[0] = l->origin[0] + toCam[0] * ( invDist * nudge );
+		center[1] = l->origin[1] + toCam[1] * ( invDist * nudge );
+		center[2] = l->origin[2] + toCam[2] * ( invDist * nudge );
+
+		size = l->radius * 0.14f;
+		if ( size < 10.0f ) size = 10.0f;
+		else if ( size > 36.0f ) size = 36.0f;
+
+		VectorScale( backEnd.viewParms.or.axis[1], size, left );
+		VectorScale( backEnd.viewParms.or.axis[2], size, up );
+
+		c.rgba[0] = (byte)r;
+		c.rgba[1] = (byte)g;
+		c.rgba[2] = (byte)b;
+		c.rgba[3] = 255;
+
+		RB_AddQuadStamp( center, left, up, c );
+	}
+
+	if ( drawn ) {
+		RB_EndSurface();
+	}
+}
+
+
 void RB_RenderFlares( void ) {
 	flare_t		*f;
 	flare_t		**prev;
@@ -485,6 +619,9 @@ void RB_RenderFlares( void ) {
 	if ( !r_flares->integer ) {
 		return;
 	}
+
+	// Render batched hardware depth-tested dynamic light halos first (works on all GPUs, 0 SSBO stalls)
+	RB_RenderDlightCoronas();
 
 	// Flare visibility is tested by drawing a point through vk.dot_pipeline,
 	// which writes a storage-buffer flag through a fragment shader (there is no
@@ -513,7 +650,7 @@ void RB_RenderFlares( void ) {
 	backEnd.currentEntity = &tr.worldEntity;
 	backEnd.or = backEnd.viewParms.world;
 
-	//RB_AddDlightFlares();
+	// Dynamic light halos are now rendered in a single depth-tested batch by RB_RenderDlightCoronas() above.
 
 	// perform z buffer readback on each flare in this view
 	draw = qfalse;

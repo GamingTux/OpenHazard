@@ -429,18 +429,24 @@ typedef struct {
 	VkDescriptorSetLayout set_layout_sampler;	// combined image sampler
 	VkDescriptorSetLayout set_layout_uniform;	// dynamic uniform buffer
 	VkDescriptorSetLayout set_layout_storage;	// feedback buffer
+	VkDescriptorSetLayout set_layout_input;		// subpass input attachment (direct post-FX)
 
 	VkPipelineLayout pipeline_layout;			// default shaders
 	VkPipelineLayout pipeline_layout_storage;	// flare test shader layout
 	VkPipelineLayout pipeline_layout_post_process;	// post-processing
 	VkPipelineLayout pipeline_layout_blend;		// post-processing
 	VkPipelineLayout pipeline_layout_ssao;		// SSAO (1 sampler + 16-byte push constants)
+	VkPipelineLayout pipeline_layout_direct_post;	// direct on-chip subpass post-FX (1 input attachment)
 
 	VkDescriptorSet color_descriptor;
 	VkDescriptorSet depth_descriptor;
+	VkDescriptorSet direct_color_descriptor;
 
 	VkImage color_image;
 	VkImageView color_image_view;
+
+	VkImage direct_color_image;
+	VkImageView direct_color_image_view;
 
 	VkImage bloom_image[1+VK_NUM_BLOOM_PASSES*2];
 	VkImageView bloom_image_view[1+VK_NUM_BLOOM_PASSES*2];
@@ -557,6 +563,7 @@ typedef struct {
 
 		VkShaderModule gamma_fs;
 		VkShaderModule gamma_vs;
+		VkShaderModule direct_post_fs;
 		VkShaderModule ssao_fs;
 		VkShaderModule ssao_ms_fs;
 		VkShaderModule ssao_blur_fs;
@@ -632,6 +639,7 @@ typedef struct {
 	uint32_t dot_pipeline;
 
 	VkPipeline gamma_pipeline;
+	VkPipeline direct_post_pipeline;
 	VkPipeline capture_pipeline;
 	VkPipeline bloom_extract_pipeline;
 	VkPipeline blur_pipeline[VK_NUM_BLOOM_PASSES*2]; // horizontal & vertical pairs
@@ -663,6 +671,7 @@ typedef struct {
 
 	qboolean clearAttachment;		// requires VK_IMAGE_USAGE_TRANSFER_DST_BIT for swapchains
 	qboolean fboActive;
+	qboolean directPostActive;		// on-chip subpass post-FX inside r_fbo 0 main render pass
 	qboolean blitEnabled;
 	qboolean msaaActive;
 	qboolean bloomActive;

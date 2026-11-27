@@ -451,6 +451,7 @@ void RE_EndFrame( int *frontEndMsec, int *backEndMsec ) {
 		|| r_tonemap->modified
 		|| r_sharpen->modified
 		|| r_ssao_intensity->modified
+		|| r_vignette->modified
 		|| r_ohClassic->modified ) {
 
 		// texturemode stuff
@@ -466,7 +467,7 @@ void RE_EndFrame( int *frontEndMsec, int *backEndMsec ) {
 		}
 
 #ifdef USE_VULKAN
-		if ( vk.fboActive ) {
+		if ( vk.fboActive || vk.directPostActive || r_tonemap->modified || r_dither->modified || r_ohClassic->modified ) {
 			vk_update_post_process_pipelines();
 		}
 		r_greyscale->modified = qfalse;
@@ -477,6 +478,7 @@ void RE_EndFrame( int *frontEndMsec, int *backEndMsec ) {
 		r_tonemap->modified = qfalse;
 		r_sharpen->modified = qfalse;
 		r_ssao_intensity->modified = qfalse;
+		r_vignette->modified = qfalse;
 		r_ohClassic->modified = qfalse;
 #endif
 
