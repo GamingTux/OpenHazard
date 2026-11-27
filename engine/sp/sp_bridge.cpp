@@ -65,6 +65,7 @@ extern "C" {
     int   FS_FOpenFileWrite( const char *qpath );
     long  FS_FOpenFileRead( const char *qpath, fileHandle_t *file, qboolean uniqueFILE );
     void  FS_Rename( const char *from, const char *to );
+    void  FS_HomeRemove( const char *homePath );
     cvar_t *Cvar_Get( const char *name, const char *value, int flags );
     void  Cvar_Set( const char *name, const char *value );
     int   Cvar_Flags( const char *name );   // engine flags, or CVAR_NONEXISTENT if unregistered
@@ -1251,7 +1252,9 @@ static int  g_transGameFlag = 0;
 // DISCARD the snapshot (its __trans.sav holds the OLD map's full table, whose inline-model *N indices would
 // crash the new BSP) and carry the player via the playersave/* cvars. 1 = autosave load, 0 = forward transition.
 static int  g_transIsAutoLoad = 0;
+static int  g_deleteCompareSave = 0;
 #define TRANS_SAV "saves/__trans.sav"
+extern "C" void SP_RequestFullRendererReinit(void);
 
 // SP loading-screen gate (defined in sp_integration.c): hold the per-map levelshot over the
 // whole spmap->efsptrans reload window so the HM loading splash never shows during a transition.
@@ -1427,11 +1430,11 @@ extern "C" qboolean SP_FinishTransition(void){
     BuildSnapshot();
     BuildGameState();                   // rebuild AFTER ClientBegin so CS_PLAYERS+0 (player model) is in the
                                         // gamestate the cgame reads at CG_INIT (no live CG_CONFIGSTRING path)
-    SP_FillGlConfig();                  // MUST run before CG_INIT: without it g_glconfig.vidWidth=0 on the
-                                        // LOAD/transition path -> cgame refdef 0x0 -> black 3D world. See helper.
     SPR_InitRenderer();                 // R_Init (the GPU teardown half, SPR_ShutdownRenderer, already ran ABOVE
                                         // before Hunk_Clear). Clears tr.worldMapLoaded so the new world loads
                                         // (fixes "redundantly load world map" on Load Game / level transition).
+    SP_FillGlConfig();                  // MUST run after SPR_InitRenderer and before CG_INIT so a full Vulkan
+                                        // reinit (e.g. F8 compare toggle) refreshes g_glconfig from cls.glconfig.
     SP_CallVmMain(CG_INIT, 0, 0, 0);    // new cgame (re-registers media + CG_R_LOADWORLDMAP)
     g_spActive = 1;
     s_worldResident = qtrue;            // C1: a world now occupies the hunk/GPU -> a later New Game must reclaim
@@ -1450,6 +1453,10 @@ extern "C" qboolean SP_FinishTransition(void){
     // LOAD (death-respawn, g_transIsAutoLoad==1) must NOT rewrite `auto` -- that would overwrite the player's own
     // checkpoint with the just-reloaded state. A user eFULL LOAD (g_transGameFlag==0) is already excluded.
     if( g_transGameFlag != 0 && !g_transIsAutoLoad ) SP_WriteEntryAutosave();
+    if( g_deleteCompareSave ){
+        g_deleteCompareSave = 0;
+        FS_HomeRemove( "saves/__oh_compare.sav" );
+    }
     blog("SP_FinishTransition: done numEnt=%d ps.origin=(%.0f %.0f %.0f)\n",
          ge->num_entities, g_snap.ps.origin[0], g_snap.ps.origin[1], g_snap.ps.origin[2]);
     return qtrue;
@@ -1596,6 +1603,21 @@ static void SP_SaveGameInternal(const char* name, qboolean bEAUTO){
 // like retail's `save`/`wipe` command path (gameFlag 0). The eAUTO level-entry autosave goes through
 // SP_SaveGameInternal(...,qtrue) from SP_WriteEntryAutosave only.
 extern "C" void SP_SaveGame(const char* name){ SP_SaveGameInternal(name, qfalse); }
+
+extern "C" void SP_LoadGameFile(const char* name);
+
+// Live A/B screenshot compare reload (F8 oh_toggle): saves the exact player position/angles
+// to a temporary hidden slot, tears down & rebuilds the Vulkan renderer with the newly toggled
+// latched cvars + r_hdTextures state, and reloads right back to the exact same spot.
+extern "C" int SP_CompareReload( void ) {
+    if ( !ge || !g_spActive || g_transMap[0] ) return 0;
+    if ( ge->GameAllowedToSaveHere && !ge->GameAllowedToSaveHere() ) return 0;
+    SP_SaveGameInternal( "__oh_compare", qfalse );
+    SP_RequestFullRendererReinit();
+    g_deleteCompareSave = 1;
+    SP_LoadGameFile( "__oh_compare" );
+    return 1;
+}
 
 // EF1 SP 1:1: retail writes an `auto` autosave on every FRESH (non-loaded) level entry, right after the
 // first ClientBegin (retail SV spawn path), so the death-screen respawn (`load *respawn` -> load `auto`,

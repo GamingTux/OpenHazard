@@ -256,6 +256,7 @@ typedef struct searchpath_s {
 
 static	char		fs_gamedir[MAX_OSPATH];	// this will be a single file name with no separators
 static	cvar_t		*fs_debug;
+static	cvar_t		*r_hdTextures;
 static	cvar_t		*fs_homepath;
 
 #ifdef __APPLE__
@@ -1418,6 +1419,12 @@ long FS_FOpenFileRead(const char *filename, fileHandle_t *file, qboolean uniqueF
 	{
 		// autoexec.cfg and q3config.cfg can only be loaded outside of pk3 files.
 		if (isLocalConfig && search->pack)
+			continue;
+
+		// Allow toggling OpenHazard HD/ASTC texture override packs (zzz_openhazard_hd*.pk3)
+		// off at runtime for true vanilla-vs-remastered A/B comparisons.
+		if (search->pack && r_hdTextures && !r_hdTextures->integer &&
+		    !Q_stricmpn(search->pack->pakBasename, "zzz_openhazard_hd", 17))
 			continue;
 
 		len = FS_FOpenFileReadDir(filename, search, file, uniqueFILE, qfalse);
@@ -3351,6 +3358,7 @@ static void FS_Startup( const char *gameName )
 	fs_packFiles = 0;
 
 	fs_debug = Cvar_Get( "fs_debug", "0", 0 );
+	r_hdTextures = Cvar_Get( "r_hdTextures", "1", CVAR_ARCHIVE );
 	fs_cdpath = Cvar_Get ("fs_cdpath", "", CVAR_INIT );
 	fs_basepath = Cvar_Get ("fs_basepath", Sys_DefaultInstallPath(), CVAR_INIT|CVAR_PROTECTED );
 	fs_basegame = Cvar_Get ("fs_basegame", "", CVAR_INIT );

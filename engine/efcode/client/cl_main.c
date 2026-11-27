@@ -2066,55 +2066,155 @@ doesn't know what graphics to reload
 ==================
 CL_OpenHazardToggle_f
 
-Live A/B hotkey (default F8): instantly toggles all OpenHazard visual &
-widescreen enhancements on/off in-game (0 ms, no vid_restart needed during
-active SP gameplay) while preserving the user's exact settings.
+A/B screenshot comparison hotkey (default F8):
+Toggles between:
+  1) VANILLA 2000: all modern FX OFF (no FBO/Bloom/SSAO/HDR/MSAA/AF/PMLight)
+     AND no HD/ASTC texture packs (r_hdTextures 0 -> original 2000 pak0..3 textures).
+  2) MAXIMAL + HD ASTC: all modern FX MAX (FBO, 4x MSAA, 16x AF, PMLight, Bloom,
+     SSAO, HDR, Tonemap, CAS sharpen) AND 2x HD Hardware-ASTC textures (r_hdTextures 1).
+
+During active SP gameplay, triggers a seamless save+full-Vulkan-reinit+reload at the
+exact same spot/angles (SP_CompareReload) so latched Vulkan settings and textures
+actually switch 1:1. User's original everyday settings are snapshotted on first press
+and automatically restored on quit (or via `oh_restore`).
 ==================
 */
+static const char *oh_saved_cvar_names[] = {
+	"r_ohClassic",
+	"r_hdTextures",
+	"r_fbo",
+	"r_gpuAutoTune",
+	"r_ext_multisample",
+	"r_ext_alpha_to_coverage",
+	"r_ext_texture_filter_anisotropic",
+	"r_ext_max_anisotropy",
+	"r_ext_compressed_textures",
+	"r_dlightMode",
+	"r_dlightScale",
+	"r_flares",
+	"r_lodbias",
+	"r_bloom",
+	"r_bloom_downscale",
+	"r_bloom_intensity",
+	"r_bloom_threshold",
+	"r_ssao",
+	"r_ssao_intensity",
+	"r_hdr",
+	"r_tonemap",
+	"r_sharpen",
+};
+#define OH_NUM_SAVED_CVARS (int)(sizeof(oh_saved_cvar_names) / sizeof(oh_saved_cvar_names[0]))
+
 static struct {
-	qboolean	classicActive;
-	char		dlightMode[16];
-	char		dlightScale[16];
-	char		flares[16];
-	char		lodbias[16];
-	char		fovAspect[16];
+	qboolean	snapshotted;
+	qboolean	vanillaMode;
+	char		vals[OH_NUM_SAVED_CVARS][32];
 } oh_toggle_state;
 
-static void CL_OpenHazardRestoreLive( void ) {
-	if ( !oh_toggle_state.classicActive ) {
+static void CL_OpenHazardSnapshotUserSettings( void ) {
+	int i;
+	if ( oh_toggle_state.snapshotted ) {
 		return;
 	}
-	Cvar_Set( "r_ohClassic", "0" );
-	if ( oh_toggle_state.dlightMode[0] )  Cvar_Set( "r_dlightMode", oh_toggle_state.dlightMode );
-	if ( oh_toggle_state.dlightScale[0] ) Cvar_Set( "r_dlightScale", oh_toggle_state.dlightScale );
-	if ( oh_toggle_state.flares[0] )      Cvar_Set( "r_flares", oh_toggle_state.flares );
-	if ( oh_toggle_state.lodbias[0] )     Cvar_Set( "r_lodbias", oh_toggle_state.lodbias );
-	if ( oh_toggle_state.fovAspect[0] )   Cvar_Set( "cg_fovAspectAdjust", oh_toggle_state.fovAspect );
-	oh_toggle_state.classicActive = qfalse;
+	for ( i = 0; i < OH_NUM_SAVED_CVARS; i++ ) {
+		Q_strncpyz( oh_toggle_state.vals[i], Cvar_VariableString( oh_saved_cvar_names[i] ), sizeof( oh_toggle_state.vals[i] ) );
+	}
+	oh_toggle_state.snapshotted = qtrue;
+}
+
+static void CL_OpenHazardRestoreLive( void ) {
+	int i;
+	if ( !oh_toggle_state.snapshotted ) {
+		return;
+	}
+	for ( i = 0; i < OH_NUM_SAVED_CVARS; i++ ) {
+		if ( oh_toggle_state.vals[i][0] ) {
+			Cvar_Set( oh_saved_cvar_names[i], oh_toggle_state.vals[i] );
+		}
+	}
+	oh_toggle_state.snapshotted = qfalse;
+	oh_toggle_state.vanillaMode = qfalse;
+}
+
+static void CL_OpenHazardApplyReload( void ) {
+	extern int SP_IsActive( void );
+	extern int SP_CompareReload( void );
+
+	if ( SP_IsActive() ) {
+		if ( !SP_CompareReload() ) {
+			Com_Printf( "^3[OpenHazard F8] ^7Cutscene active: live FX toggled, full texture/FBO reload skipped.\n" );
+		}
+	} else {
+		Cbuf_AddText( "vid_restart\n" );
+	}
+}
+
+static void CL_OpenHazardRestore_f( void ) {
+	if ( !oh_toggle_state.snapshotted ) {
+		Com_Printf( "^3[OpenHazard] ^7Already on your saved everyday settings.\n" );
+		return;
+	}
+	CL_OpenHazardRestoreLive();
+	Com_Printf( "^3[OpenHazard] ^2Restored your normal settings.\n" );
+	CL_OpenHazardApplyReload();
 }
 
 static void CL_OpenHazardToggle_f( void ) {
-	if ( !oh_toggle_state.classicActive ) {
-		// Snapshot current live values before switching to Classic 2000 preview
-		Q_strncpyz( oh_toggle_state.dlightMode,  Cvar_VariableString( "r_dlightMode" ),       sizeof( oh_toggle_state.dlightMode ) );
-		Q_strncpyz( oh_toggle_state.dlightScale, Cvar_VariableString( "r_dlightScale" ),      sizeof( oh_toggle_state.dlightScale ) );
-		Q_strncpyz( oh_toggle_state.flares,      Cvar_VariableString( "r_flares" ),           sizeof( oh_toggle_state.flares ) );
-		Q_strncpyz( oh_toggle_state.lodbias,     Cvar_VariableString( "r_lodbias" ),          sizeof( oh_toggle_state.lodbias ) );
-		Q_strncpyz( oh_toggle_state.fovAspect,   Cvar_VariableString( "cg_fovAspectAdjust" ), sizeof( oh_toggle_state.fovAspect ) );
+	CL_OpenHazardSnapshotUserSettings();
 
+	if ( !oh_toggle_state.vanillaMode ) {
+		// Switch to pure VANILLA 2000 (all modern FX OFF, original 2000 textures only)
 		Cvar_Set( "r_ohClassic", "1" );
+		Cvar_Set( "r_hdTextures", "0" );
+		Cvar_Set( "r_fbo", "0" );
+		Cvar_Set( "r_gpuAutoTune", "0" );
+		Cvar_Set( "r_ext_multisample", "0" );
+		Cvar_Set( "r_ext_alpha_to_coverage", "0" );
+		Cvar_Set( "r_ext_texture_filter_anisotropic", "0" );
+		Cvar_Set( "r_ext_max_anisotropy", "1" );
+		Cvar_Set( "r_ext_compressed_textures", "0" );
 		Cvar_Set( "r_dlightMode", "0" );
 		Cvar_Set( "r_dlightScale", "0.5" );
 		Cvar_Set( "r_flares", "0" );
 		Cvar_Set( "r_lodbias", "0" );
-		Cvar_Set( "cg_fovAspectAdjust", "0" );
-		oh_toggle_state.classicActive = qtrue;
+		Cvar_Set( "r_bloom", "0" );
+		Cvar_Set( "r_ssao", "0" );
+		Cvar_Set( "r_hdr", "0" );
+		Cvar_Set( "r_tonemap", "0" );
+		Cvar_Set( "r_sharpen", "0" );
+		oh_toggle_state.vanillaMode = qtrue;
 
-		Com_Printf( "^3[OpenHazard F8] ^1CLASSIC 2000 MODE ^7(Bloom/SSAO/Tonemap/CAS/Dlights/Hor+ OFF - F8 to restore)\n" );
+		Com_Printf( "^3[OpenHazard F8] ^1VANILLA 2000 ^7(All FX OFF + original textures - F8 for MAX + HD ASTC)\n" );
 	} else {
-		CL_OpenHazardRestoreLive();
-		Com_Printf( "^3[OpenHazard F8] ^2ENHANCED MODE ^7(All OpenHazard FX restored)\n" );
+		// Switch to MAXIMAL + 2x HD Hardware-ASTC (all remaster FX on max for screenshots)
+		Cvar_Set( "r_ohClassic", "0" );
+		Cvar_Set( "r_hdTextures", "1" );
+		Cvar_Set( "r_fbo", "1" );
+		Cvar_Set( "r_gpuAutoTune", "0" );
+		Cvar_Set( "r_ext_multisample", "4" );
+		Cvar_Set( "r_ext_alpha_to_coverage", "1" );
+		Cvar_Set( "r_ext_texture_filter_anisotropic", "1" );
+		Cvar_Set( "r_ext_max_anisotropy", "16" );
+		Cvar_Set( "r_ext_compressed_textures", "1" );
+		Cvar_Set( "r_dlightMode", "2" );
+		Cvar_Set( "r_dlightScale", "0.9" );
+		Cvar_Set( "r_flares", "1" );
+		Cvar_Set( "r_lodbias", "-2" );
+		Cvar_Set( "r_bloom", "1" );
+		Cvar_Set( "r_bloom_downscale", "2" );
+		Cvar_Set( "r_bloom_intensity", "0.35" );
+		Cvar_Set( "r_bloom_threshold", "0.70" );
+		Cvar_Set( "r_ssao", "1" );
+		Cvar_Set( "r_ssao_intensity", "0.75" );
+		Cvar_Set( "r_hdr", "1" );
+		Cvar_Set( "r_tonemap", "1" );
+		Cvar_Set( "r_sharpen", "0.25" );
+		oh_toggle_state.vanillaMode = qfalse;
+
+		Com_Printf( "^3[OpenHazard F8] ^2MAXIMAL + HD ASTC ^7(4x MSAA, 16x AF, Bloom, SSAO, HDR, CAS + 2x HD ASTC)\n" );
 	}
+
+	CL_OpenHazardApplyReload();
 }
 
 void CL_Vid_Restart_f( void ) {
@@ -4604,6 +4704,7 @@ void CL_Init( void ) {
 	Cmd_AddCommand ("snd_restart", CL_Snd_Restart_f);
 	Cmd_AddCommand ("vid_restart", CL_Vid_Restart_f);
 	Cmd_AddCommand ("oh_toggle", CL_OpenHazardToggle_f);
+	Cmd_AddCommand ("oh_restore", CL_OpenHazardRestore_f);
 #ifdef USE_RENDERER_DLOPEN
 	Cmd_AddCommand ("setrenderer", CL_SetRenderer_f);	// next-launch renderer choice (Renderer row in the video menu)
 #endif

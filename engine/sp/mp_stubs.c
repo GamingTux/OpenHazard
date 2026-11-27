@@ -63,6 +63,7 @@ void SP_LogBacktrace( int sig ) {
 #endif
 
 int  SP_IsActive( void )                                        { return 0; }
+int  SP_CompareReload( void )                                   { return 0; }
 int  SP_SkipCutscene( void )                                    { return 0; }
 int  SP_IsLoading( void )                                       { return 0; }
 int  SP_LoadPumping( void )                                     { return 0; }

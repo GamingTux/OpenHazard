@@ -146,8 +146,19 @@ void SPR_LoadWorld(const char* n){ if(re.LoadWorld && Cvar_VariableIntegerValue(
 // vk_release_resources (-> qvkResetDescriptorPool) while KEEPING the Vulkan context/device. Resetting the
 // descriptor pool here is also what prevents qvkAllocateDescriptorSets VK_ERROR_OUT_OF_POOL_MEMORY after
 // ~7 loads. Reload-only path (the fresh New-Game path never calls this).
+static int g_spFullRendererReinit = 0;
+
+void SP_RequestFullRendererReinit(void) {
+    g_spFullRendererReinit = 1;
+}
+
 void SPR_ShutdownRenderer(void){
-    if( re.Shutdown ) re.Shutdown( qfalse );
+    if( g_spFullRendererReinit ){
+        g_spFullRendererReinit = 0;
+        if( re.Shutdown ) re.Shutdown( qtrue );
+    } else {
+        if( re.Shutdown ) re.Shutdown( qfalse );
+    }
 }
 // SPR_InitRenderer: CL_InitRenderer -> re.BeginRegistration (R_Init clears tr.worldMapLoaded so the new
 // world loads) AND re-registers the engine-persistent shaders R_Init invalidated (charSet/white/console +
