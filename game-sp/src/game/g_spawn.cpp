@@ -1389,7 +1389,14 @@ void G_SpawnEntitiesFromString( const char *entityString ) {
 			// BEFORE this script Runs and resolves its affect() targets. Retail's fixed-50ms
 			// SV_Frame cadence masks this race; our bridge advances by variable wall-clock delta.
 			// (FIX B.1 — covers level-load entities; mid-level USE-triggered targets need FIX B.4.)
-			script_runner->nextthink = level.time + 500;
+			// Exception: _brig/remove only removes static BSP NPC spawners (after an internal
+			// wait(100)) and MUST finish before _brig/pickanumber uses all 14 spawners, otherwise
+			// every crew member spawns sequentially and restarts the brig cutscene camera loop.
+			if ( !Q_stricmp( level.mapname, "_brig" ) ) {
+				script_runner->nextthink = level.time + FRAMETIME;
+			} else {
+				script_runner->nextthink = level.time + 500;
+			}
 
 			if ( ICARUS_ValidEnt( script_runner ) )
 			{

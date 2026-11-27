@@ -710,6 +710,17 @@ void scriptrunner_run (gentity_t *self)
 		self->nextthink = 1000;
 		return;
 	}
+	// On _brig, worldspawn's _brig/remove runs at level.time=1050 with an internal wait(100)
+	// (~1250), and Q3_RemoveEnt frees non-client spawners 100 ms later (~1350). Hold
+	// _brig/pickanumber (t1, fired at ClientBegin level.time=1000) until 1450 so all 13
+	// unused spawners are freed before t1 uses them and only 1 visitor spawns.
+	if ( level.time < 1450 && !Q_stricmp( level.mapname, "_brig" ) &&
+	     self->behaviorSet[BSET_USE] && !Q_stricmp( self->behaviorSet[BSET_USE], "_brig/pickanumber" ) )
+	{
+		self->e_ThinkFunc = thinkF_scriptrunner_run;
+		self->nextthink = 1450;
+		return;
+	}
 	/*
 	if (self->behaviorSet[BSET_USE])
 	{	
