@@ -1895,6 +1895,15 @@ static qboolean ParseShader( const char **text )
 				shader.clampTime = Q_atof( token );
 			}
 		}
+		// capture q3map_surfacelight intensity for zero-FBO fake bloom before skipping other q3map_* keys
+		else if ( !Q_stricmp( token, "q3map_surfacelight" ) ) {
+			token = COM_ParseExt( text, qfalse );
+			if ( token[0] ) {
+				shader.surfaceLight = Q_atof( token );
+			}
+			SkipRestOfLine( text );
+			continue;
+		}
 		// skip stuff that only the q3map needs
 		else if ( !Q_stricmpn( token, "q3map", 5 ) ) {
 			SkipRestOfLine( text );
@@ -4604,22 +4613,20 @@ static void CreateExternalShaders( void ) {
 		}
 	}
 
-	// Hardware depth-tested additive corona shader for zero-stall dynamic light halos (r_dlightFlares)
+	// Hardware depth-tested additive procedural Gaussian bloom shader for zero-FBO fake bloom & dynamic light halos
 	{
-		image_t *coronaImg = tr.whiteImage;
-		if ( !tr.flareShader->defaultShader && tr.flareShader->stages[0] && tr.flareShader->stages[0]->bundle[0].image[0] ) {
-			coronaImg = tr.flareShader->stages[0]->bundle[0].image[0];
-		}
-		InitShader( "<dlightCorona>", LIGHTMAP_NONE );
+		image_t *haloImg = tr.bloomHaloImage ? tr.bloomHaloImage : tr.whiteImage;
+		InitShader( "<bloomHalo>", LIGHTMAP_NONE );
 		shader.cullType = CT_TWO_SIDED;
 		shader.sort = SS_BLEND1;
-		stages[0].bundle[0].image[0] = coronaImg;
+		stages[0].bundle[0].image[0] = haloImg;
 		stages[0].bundle[0].tcGen = TCGEN_TEXTURE;
 		stages[0].bundle[0].rgbGen = CGEN_EXACT_VERTEX;
 		stages[0].bundle[0].alphaGen = AGEN_VERTEX;
 		stages[0].active = qtrue;
 		stages[0].stateBits = GLS_SRCBLEND_ONE | GLS_DSTBLEND_ONE;
-		tr.dlightCoronaShader = FinishShader();
+		tr.bloomHaloShader = FinishShader();
+		tr.dlightCoronaShader = tr.bloomHaloShader;
 	}
 
 	tr.sunShader = R_FindShader( "sun", LIGHTMAP_NONE, qtrue );

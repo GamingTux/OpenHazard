@@ -2094,6 +2094,8 @@ static const char *oh_saved_cvar_names[] = {
 	"r_dlightScale",
 	"r_flares",
 	"r_dlightFlares",
+	"r_fakeBloom",
+	"r_fakeBloomIntensity",
 	"r_entityLighting",
 	"r_lodbias",
 	"r_bloom",
@@ -2183,6 +2185,7 @@ static void CL_OpenHazardToggle_f( void ) {
 		Cvar_Set( "r_dlightScale", "0.5" );
 		Cvar_Set( "r_flares", "0" );
 		Cvar_Set( "r_dlightFlares", "0" );
+		Cvar_Set( "r_fakeBloom", "0" );
 		Cvar_Set( "r_entityLighting", "0" );
 		Cvar_Set( "r_lodbias", "0" );
 		Cvar_Set( "r_bloom", "0" );

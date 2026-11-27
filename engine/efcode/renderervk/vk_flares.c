@@ -509,27 +509,39 @@ extend past the portal edge will be overwritten.
 */
 /*
 ==================
-RB_RenderDlightCoronas
+RB_RenderBloomHalos
 
-Renders soft additive glow halos ("zero-FBO pseudo-bloom") around dynamic lights
-in a SINGLE batched world-space hardware depth-tested draw call (no vk.dot_pipeline
-SSBO fragment-write stall, no 1-frame lag, true Z-occlusion against walls/doors).
+Zero-FBO Fake-Bloom + dynamic light coronas rendered in ONE SINGLE batched world-space
+hardware depth-tested draw call using the procedural 2-lobe Gaussian glow shader:
+- Static BSP light fixtures (tr.world->bloomHalos): PVS-culled, normal-faded, distance-faded
+  (auto-disabled when true FBO r_bloom 1 is active so it never double-blooms).
+- Dynamic lights (backEnd.refdef.dlights): phasers, explosions, consoles, Borg energy.
+Zero vk.dot_pipeline SSBO stalls, zero 1-frame lag, true Z-occlusion against walls/doors.
 ==================
 */
-static void RB_RenderDlightCoronas( void ) {
+static void RB_RenderBloomHalos( void ) {
 	const dlight_t *l;
 	int i, drawn = 0;
+	qboolean doStatic, doDynamic;
+	float fakeIntensity;
 
-	if ( !r_flares->integer || !r_dlightFlares || !r_dlightFlares->integer ) {
-		return;
-	}
 	if ( r_ohClassic && r_ohClassic->integer ) {
 		return;
 	}
-	if ( !tr.dlightCoronaShader || backEnd.refdef.num_dlights <= 0 ) {
+	if ( !tr.bloomHaloShader ) {
 		return;
 	}
 	if ( vk.renderPassIndex == RENDER_PASS_SCREENMAP || backEnd.isHyperspace ) {
+		return;
+	}
+
+	fakeIntensity = r_fakeBloomIntensity ? Com_Clamp( 0.0f, 1.5f, r_fakeBloomIntensity->value ) : 0.55f;
+	doStatic = ( r_fakeBloom && r_fakeBloom->integer && fakeIntensity > 0.01f && !vk.bloomActive &&
+		tr.world && tr.world->bloomHalos && tr.world->numBloomHalos > 0 ) ? qtrue : qfalse;
+	doDynamic = ( r_flares->integer && r_dlightFlares && r_dlightFlares->integer &&
+		backEnd.refdef.num_dlights > 0 ) ? qtrue : qfalse;
+
+	if ( !doStatic && !doDynamic ) {
 		return;
 	}
 
@@ -540,68 +552,156 @@ static void RB_RenderDlightCoronas( void ) {
 	Com_Memcpy( vk_world.modelview_transform, backEnd.viewParms.world.modelMatrix, sizeof( vk_world.modelview_transform ) );
 	vk_update_mvp( NULL );
 
-	l = backEnd.refdef.dlights;
-	for ( i = 0; i < backEnd.refdef.num_dlights; i++, l++ ) {
-		vec3_t toCam, center, left, up;
-		float dist, invDist, camFade, radScale, size, scale, nudge;
-		color4ub_t c;
-		int r, g, b;
+	// 1. Static map light fixture soft Gaussian bloom halos (PVS + frustum + normal culled)
+	if ( doStatic ) {
+		const byte *pvs = ( tr.world->vis && tr.viewCluster >= 0 )
+			? ( tr.world->vis + tr.viewCluster * tr.world->clusterBytes ) : NULL;
+		const worldBloomHalo_t *halos = tr.world->bloomHalos;
+		int numHalos = tr.world->numBloomHalos;
 
-		if ( l->radius < 24.0f ) {
-			continue;
+		for ( i = 0; i < numHalos; i++ ) {
+			const worldBloomHalo_t *h = &halos[i];
+			vec3_t toCam, center, left, up;
+			float dist, invDist, fwdDot, facing, distFade, scale, nudge, size;
+			color4ub_t c;
+			int r, g, b;
+
+			if ( pvs && h->cluster >= 0 && !( pvs[ h->cluster >> 3 ] & ( 1 << ( h->cluster & 7 ) ) ) ) {
+				continue;
+			}
+
+			VectorSubtract( backEnd.viewParms.or.origin, h->origin, toCam );
+			dist = VectorLength( toCam );
+			if ( dist < 18.0f || dist > 1350.0f ) {
+				continue;
+			}
+			invDist = 1.0f / dist;
+
+			// View-cone check (toCam points from light -> eye, so negative dot with forward means in front)
+			fwdDot = -DotProduct( toCam, backEnd.viewParms.or.axis[0] ) * invDist;
+			if ( fwdDot < 0.25f ) {
+				continue;
+			}
+
+			// Smoothly fade lights facing away from the viewer (allow shallow hallway ceiling angles to glow!)
+			if ( h->normal[0] || h->normal[1] || h->normal[2] ) {
+				float ndot = DotProduct( h->normal, toCam ) * invDist;
+				if ( ndot <= -0.25f ) {
+					continue;
+				}
+				facing = Com_Clamp( 0.0f, 1.0f, ndot * 1.25f + 0.35f );
+			} else {
+				facing = 1.0f;
+			}
+
+			// Smooth near + far distance attenuation
+			distFade = 1.0f;
+			if ( dist < 56.0f ) {
+				distFade = ( dist - 18.0f ) * ( 1.0f / 38.0f );
+			} else if ( dist > 750.0f ) {
+				distFade = ( 1350.0f - dist ) * ( 1.0f / 600.0f );
+			}
+
+			scale = 0.78f * fakeIntensity * h->intensity * facing * distFade;
+			r = (int)( h->color[0] * scale * 255.0f );
+			g = (int)( h->color[1] * scale * 255.0f );
+			b = (int)( h->color[2] * scale * 255.0f );
+			if ( r > 215 ) r = 215;
+			if ( g > 215 ) g = 215;
+			if ( b > 215 ) b = 215;
+			if ( r + g + b < 10 ) {
+				continue;
+			}
+
+			if ( !drawn ) {
+				RB_BeginSurface( tr.bloomHaloShader, 0 );
+				drawn = 1;
+			}
+
+			// Clamp angular billboard size so overhead lamps never overdraw the entire 1080p screen
+			size = MIN( h->radius, dist * 0.32f );
+
+			// Gentle pull toward camera wraps the soft glow over the bezel while keeping true hardware Z-occlusion
+			nudge = MIN( size * 0.38f, dist * 0.22f );
+			center[0] = h->origin[0] + toCam[0] * ( invDist * nudge );
+			center[1] = h->origin[1] + toCam[1] * ( invDist * nudge );
+			center[2] = h->origin[2] + toCam[2] * ( invDist * nudge );
+
+			VectorScale( backEnd.viewParms.or.axis[1], size, left );
+			VectorScale( backEnd.viewParms.or.axis[2], size, up );
+
+			c.rgba[0] = (byte)r;
+			c.rgba[1] = (byte)g;
+			c.rgba[2] = (byte)b;
+			c.rgba[3] = 255;
+
+			RB_AddQuadStamp( center, left, up, c );
 		}
+	}
 
-		VectorSubtract( backEnd.viewParms.or.origin, l->origin, toCam );
-		dist = VectorLength( toCam );
-		if ( dist < 36.0f ) {
-			continue; // never blind the crosshair on player's own muzzle flash
+	// 2. Dynamic light soft Gaussian bloom halos (phasers, explosions, Borg energy, consoles)
+	if ( doDynamic ) {
+		l = backEnd.refdef.dlights;
+		for ( i = 0; i < backEnd.refdef.num_dlights; i++, l++ ) {
+			vec3_t toCam, center, left, up;
+			float dist, invDist, camFade, radScale, size, scale, nudge;
+			color4ub_t c;
+			int r, g, b;
+
+			if ( l->radius < 24.0f ) {
+				continue;
+			}
+
+			VectorSubtract( backEnd.viewParms.or.origin, l->origin, toCam );
+			dist = VectorLength( toCam );
+			if ( dist < 36.0f ) {
+				continue; // never blind the crosshair on player's own muzzle flash
+			}
+			if ( DotProduct( toCam, backEnd.viewParms.or.axis[0] ) >= 0.0f ) {
+				continue;
+			}
+
+			camFade = ( dist < 84.0f ) ? ( ( dist - 36.0f ) * ( 1.0f / 48.0f ) ) : 1.0f;
+			radScale = l->radius * ( 1.0f / 260.0f );
+			if ( radScale < 0.28f ) radScale = 0.28f;
+			else if ( radScale > 1.0f ) radScale = 1.0f;
+
+			scale = 0.40f * radScale * camFade;
+			r = (int)( l->color[0] * scale * 255.0f );
+			g = (int)( l->color[1] * scale * 255.0f );
+			b = (int)( l->color[2] * scale * 255.0f );
+			if ( r > 185 ) r = 185;
+			if ( g > 185 ) g = 185;
+			if ( b > 185 ) b = 185;
+			if ( r + g + b < 10 ) {
+				continue;
+			}
+
+			if ( !drawn ) {
+				RB_BeginSurface( tr.bloomHaloShader, 0 );
+				drawn = 1;
+			}
+
+			invDist = 1.0f / dist;
+			nudge = ( dist * 0.22f < 14.0f ) ? ( dist * 0.22f ) : 14.0f;
+			center[0] = l->origin[0] + toCam[0] * ( invDist * nudge );
+			center[1] = l->origin[1] + toCam[1] * ( invDist * nudge );
+			center[2] = l->origin[2] + toCam[2] * ( invDist * nudge );
+
+			size = l->radius * 0.16f;
+			if ( size < 14.0f ) size = 14.0f;
+			else if ( size > 42.0f ) size = 42.0f;
+
+			VectorScale( backEnd.viewParms.or.axis[1], size, left );
+			VectorScale( backEnd.viewParms.or.axis[2], size, up );
+
+			c.rgba[0] = (byte)r;
+			c.rgba[1] = (byte)g;
+			c.rgba[2] = (byte)b;
+			c.rgba[3] = 255;
+
+			RB_AddQuadStamp( center, left, up, c );
 		}
-		// Skip lights behind the camera
-		if ( DotProduct( toCam, backEnd.viewParms.or.axis[0] ) >= 0.0f ) {
-			continue;
-		}
-
-		camFade = ( dist < 84.0f ) ? ( ( dist - 36.0f ) * ( 1.0f / 48.0f ) ) : 1.0f;
-		radScale = l->radius * ( 1.0f / 260.0f );
-		if ( radScale < 0.28f ) radScale = 0.28f;
-		else if ( radScale > 1.0f ) radScale = 1.0f;
-
-		scale = 0.36f * radScale * camFade;
-		r = (int)( l->color[0] * scale * 255.0f );
-		g = (int)( l->color[1] * scale * 255.0f );
-		b = (int)( l->color[2] * scale * 255.0f );
-		if ( r > 185 ) r = 185;
-		if ( g > 185 ) g = 185;
-		if ( b > 185 ) b = 185;
-		if ( r + g + b < 10 ) {
-			continue;
-		}
-
-		if ( !drawn ) {
-			RB_BeginSurface( tr.dlightCoronaShader, 0 );
-			drawn = 1;
-		}
-
-		// Pull billboard center slightly toward camera so lights near walls/fixtures don't Z-clip
-		invDist = 1.0f / dist;
-		nudge = ( dist * 0.22f < 14.0f ) ? ( dist * 0.22f ) : 14.0f;
-		center[0] = l->origin[0] + toCam[0] * ( invDist * nudge );
-		center[1] = l->origin[1] + toCam[1] * ( invDist * nudge );
-		center[2] = l->origin[2] + toCam[2] * ( invDist * nudge );
-
-		size = l->radius * 0.14f;
-		if ( size < 10.0f ) size = 10.0f;
-		else if ( size > 36.0f ) size = 36.0f;
-
-		VectorScale( backEnd.viewParms.or.axis[1], size, left );
-		VectorScale( backEnd.viewParms.or.axis[2], size, up );
-
-		c.rgba[0] = (byte)r;
-		c.rgba[1] = (byte)g;
-		c.rgba[2] = (byte)b;
-		c.rgba[3] = 255;
-
-		RB_AddQuadStamp( center, left, up, c );
 	}
 
 	if ( drawn ) {
@@ -616,12 +716,12 @@ void RB_RenderFlares( void ) {
 	qboolean	draw;
 	float		*m;
 
+	// Render batched hardware Z-tested zero-FBO Fake-Bloom & dynamic light halos first
+	RB_RenderBloomHalos();
+
 	if ( !r_flares->integer ) {
 		return;
 	}
-
-	// Render batched hardware depth-tested dynamic light halos first (works on all GPUs, 0 SSBO stalls)
-	RB_RenderDlightCoronas();
 
 	// Flare visibility is tested by drawing a point through vk.dot_pipeline,
 	// which writes a storage-buffer flag through a fragment shader (there is no

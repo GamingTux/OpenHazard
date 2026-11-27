@@ -1153,6 +1153,36 @@ image_t *R_CreateImage( const char *name, const char *name2, byte *pic, int widt
 	image->view = VK_NULL_HANDLE;
 	image->descriptor = VK_NULL_HANDLE;
 	image->normalMap = NULL;
+	image->hasBloomColor = qfalse;
+	if ( pic && width > 0 && height > 0 && !( flags & ( IMGFLAG_LIGHTMAP | IMGFLAG_NOLIGHTSCALE ) ) ) {
+		int total = width * height;
+		int step = ( total > 4096 ) ? ( total / 4096 ) : 1;
+		float br = 0.0f, bg = 0.0f, bb = 0.0f, bcnt = 0.0f;
+		float ar = 0.0f, ag = 0.0f, ab = 0.0f, acnt = 0.0f;
+		int idx;
+		for ( idx = 0; idx < total; idx += step ) {
+			const byte *px = pic + idx * 4;
+			float r = px[0] * ( 1.0f / 255.0f );
+			float g = px[1] * ( 1.0f / 255.0f );
+			float b = px[2] * ( 1.0f / 255.0f );
+			float luma = r * 0.299f + g * 0.587f + b * 0.114f;
+			ar += r; ag += g; ab += b; acnt += 1.0f;
+			if ( luma >= 0.42f ) {
+				br += r; bg += g; bb += b; bcnt += 1.0f;
+			}
+		}
+		if ( bcnt >= 4.0f ) {
+			image->bloomColor[0] = br / bcnt;
+			image->bloomColor[1] = bg / bcnt;
+			image->bloomColor[2] = bb / bcnt;
+			image->hasBloomColor = qtrue;
+		} else if ( acnt > 0.0f ) {
+			image->bloomColor[0] = ar / acnt;
+			image->bloomColor[1] = ag / acnt;
+			image->bloomColor[2] = ab / acnt;
+			image->hasBloomColor = qtrue;
+		}
+	}
 
 	upload_vk_image( image, pic );
 #else
@@ -1546,6 +1576,21 @@ static image_t *R_TryLoadKTX1ASTC( const char *name, imgFlags_t flags )
 	image->view = VK_NULL_HANDLE;
 	image->descriptor = VK_NULL_HANDLE;
 	image->normalMap = NULL;
+	image->hasBloomColor = qfalse;
+	if ( uploadMips > 0 && mipSizes[uploadMips - 1] >= 16u ) {
+		// Decode 1x1 ASTC void-extent mip block directly (zero decoder overhead!) for zero-FBO fake bloom tint
+		const byte *blk = packed + mipOffsets[uploadMips - 1];
+		uint32_t w0 = (uint32_t)blk[0] | ( (uint32_t)blk[1] << 8 );
+		if ( ( w0 & 0x1FFu ) == 0x1FCu ) {
+			uint32_t cr = (uint32_t)blk[8]  | ( (uint32_t)blk[9]  << 8 );
+			uint32_t cg = (uint32_t)blk[10] | ( (uint32_t)blk[11] << 8 );
+			uint32_t cb = (uint32_t)blk[12] | ( (uint32_t)blk[13] << 8 );
+			image->bloomColor[0] = (float)cr * ( 1.0f / 65535.0f );
+			image->bloomColor[1] = (float)cg * ( 1.0f / 65535.0f );
+			image->bloomColor[2] = (float)cb * ( 1.0f / 65535.0f );
+			image->hasBloomColor = qtrue;
+		}
+	}
 
 	vk_create_image( image, upW, upH, uploadMips );
 	vk_upload_compressed_image( image, upW, upH, uploadMips, packed, mipOffsets, mipSizes, totalSize );
@@ -2003,6 +2048,33 @@ static void R_CreateBuiltinImages( void ) {
 
 	R_CreateDlightImage();
 	R_CreateFogImage();
+
+	// Procedural 64x64 2-lobe Gaussian glow texture for zero-FBO Fake-Bloom (no harsh lens-flare rings/crosses)
+	{
+		byte halo[64][64][4];
+		int hx, hy;
+		for ( hy = 0; hy < 64; hy++ ) {
+			float dy = ( (float)hy + 0.5f ) * ( 2.0f / 64.0f ) - 1.0f;
+			for ( hx = 0; hx < 64; hx++ ) {
+				float dx = ( (float)hx + 0.5f ) * ( 2.0f / 64.0f ) - 1.0f;
+				float r2 = dx * dx + dy * dy;
+				float v = 0.0f;
+				if ( r2 < 1.0f ) {
+					float edge = 1.0f - r2;
+					edge *= edge;
+					v = ( 0.35f * expf( -r2 * 10.0f ) + 0.65f * expf( -r2 * 2.6f ) ) * edge;
+				}
+				int b = (int)( v * 255.0f + 0.5f );
+				if ( b < 0 ) b = 0;
+				else if ( b > 255 ) b = 255;
+				halo[hy][hx][0] = (byte)b;
+				halo[hy][hx][1] = (byte)b;
+				halo[hy][hx][2] = (byte)b;
+				halo[hy][hx][3] = (byte)b;
+			}
+		}
+		tr.bloomHaloImage = R_CreateImage( "*bloomHalo", NULL, (byte *)halo, 64, 64, IMGFLAG_CLAMPTOEDGE | IMGFLAG_NOLIGHTSCALE );
+	}
 }
 
 

@@ -2365,6 +2365,256 @@ qboolean RE_GetEntityToken( char *buffer, int size ) {
 
 
 /*
+===============
+R_BuildWorldBloomHalos
+
+Scans static BSP world surfaces once at map load (0 ms/frame runtime overhead) to extract
+light-emitting fixtures (q3map_surfacelight or compact emissive glow stages) for zero-FBO
+Fake-Bloom halos. Nearby co-facing light faces are merged into a single smooth halo.
+===============
+*/
+#define MAX_WORLD_BLOOM_HALOS 256
+
+static int R_WorldPointCluster( const vec3_t p ) {
+	mnode_t *node = s_worldData.nodes;
+	if ( !node ) {
+		return -1;
+	}
+	while ( node->contents == -1 ) {
+		const cplane_t *plane = node->plane;
+		float d = DotProduct( p, plane->normal ) - plane->dist;
+		node = ( d >= 0.0f ) ? node->children[0] : node->children[1];
+	}
+	return node->cluster;
+}
+
+static const image_t *R_PickEmissiveStageImage( const shader_t *sh, qboolean *outHasAdditive ) {
+	int s;
+	const image_t *addImg = NULL;
+	const image_t *baseImg = NULL;
+
+	*outHasAdditive = qfalse;
+	if ( !sh ) {
+		return NULL;
+	}
+
+	for ( s = 0; s < MAX_SHADER_STAGES; s++ ) {
+		const shaderStage_t *st = sh->stages[s];
+		const image_t *img;
+		unsigned int sb;
+		if ( !st || !st->active ) {
+			break;
+		}
+		img = st->bundle[0].image[0];
+		if ( !img || img == tr.whiteImage || img == tr.defaultImage ) {
+			continue;
+		}
+		if ( !baseImg ) {
+			baseImg = img;
+		}
+		sb = st->stateBits;
+		if ( ( sb & GLS_SRCBLEND_BITS ) == GLS_SRCBLEND_ONE &&
+			( sb & GLS_DSTBLEND_BITS ) == GLS_DSTBLEND_ONE ) {
+			*outHasAdditive = qtrue;
+			if ( !addImg ) {
+				addImg = img;
+			}
+		}
+	}
+
+	return addImg ? addImg : baseImg;
+}
+
+static void R_BuildWorldBloomHalos( void ) {
+	worldBloomHalo_t tmp[ MAX_WORLD_BLOOM_HALOS ];
+	int count = 0;
+	int i, j, p;
+
+	s_worldData.bloomHalos = NULL;
+	s_worldData.numBloomHalos = 0;
+
+	if ( !s_worldData.surfaces || s_worldData.numsurfaces <= 0 || !s_worldData.nodes ) {
+		return;
+	}
+
+	for ( i = 0; i < s_worldData.numsurfaces; i++ ) {
+		const msurface_t *surf = &s_worldData.surfaces[i];
+		const shader_t *sh = surf->shader;
+		const image_t *img;
+		qboolean hasAdditive = qfalse;
+		qboolean isLightName = qfalse;
+		vec3_t mins, maxs, center, normal, samplePos, col;
+		float diag, maxC, luma, radius, intensity;
+		int cluster;
+
+		if ( !sh || sh->defaultShader || sh->isSky ) {
+			continue;
+		}
+		if ( sh->surfaceFlags & ( SURF_SKY | SURF_NODRAW | SURF_HINT | SURF_SKIP ) ) {
+			continue;
+		}
+		if ( sh->contentFlags & ( CONTENTS_WATER | CONTENTS_SLIME | CONTENTS_LAVA | CONTENTS_FOG ) ) {
+			continue;
+		}
+		if ( Q_stristr( sh->name, "noglow" ) || Q_stristr( sh->name, "burned" ) ||
+			Q_stristr( sh->name, "glass" ) || Q_stristr( sh->name, "water" ) ||
+			Q_stristr( sh->name, "portal" ) || Q_stristr( sh->name, "sky" ) ||
+			Q_stristr( sh->name, "common/" ) || Q_stristr( sh->name, "decals/" ) ) {
+			continue;
+		}
+
+		img = R_PickEmissiveStageImage( sh, &hasAdditive );
+		isLightName = ( Q_stristr( sh->name, "light" ) || Q_stristr( sh->name, "lamp" ) ||
+			Q_stristr( sh->name, "glow" ) || Q_stristr( sh->name, "alert" ) ||
+			Q_stristr( sh->name, "ember" ) || Q_stristr( sh->name, "beacon" ) ||
+			Q_stristr( sh->name, "lcars" ) || Q_stristr( sh->name, "fire" ) ||
+			Q_stristr( sh->name, "lava" ) || Q_stristr( sh->name, "console" ) ||
+			Q_stristr( sh->name, "panel" ) || Q_stristr( sh->name, "alcove" ) ) ? qtrue : qfalse;
+
+		// Qualify genuine light fixtures: explicit q3map_surfacelight, additive emissives, or fullbright lights
+		if ( sh->surfaceLight <= 0.0f ) {
+			if ( !hasAdditive && !( isLightName && ( sh->surfaceFlags & SURF_NOLIGHTMAP ) ) ) {
+				continue;
+			}
+		}
+
+		// Extract 3D bounds, centroid, and average normal from surface geometry
+		ClearBounds( mins, maxs );
+		VectorClear( normal );
+		if ( !surf->data ) {
+			continue;
+		}
+		if ( *surf->data == SF_FACE ) {
+			const srfSurfaceFace_t *face = (const srfSurfaceFace_t *)surf->data;
+			if ( face->numPoints < 3 ) {
+				continue;
+			}
+			for ( p = 0; p < face->numPoints; p++ ) {
+				AddPointToBounds( face->points[p], mins, maxs );
+			}
+			VectorCopy( face->plane.normal, normal );
+		} else if ( *surf->data == SF_TRIANGLES ) {
+			const srfTriangles_t *tri = (const srfTriangles_t *)surf->data;
+			if ( tri->numVerts < 3 ) {
+				continue;
+			}
+			for ( p = 0; p < tri->numVerts; p++ ) {
+				AddPointToBounds( tri->verts[p].xyz, mins, maxs );
+				VectorAdd( normal, tri->verts[p].normal, normal );
+			}
+			if ( VectorNormalize( normal ) < 0.001f ) {
+				VectorClear( normal );
+			}
+		} else if ( *surf->data == SF_GRID ) {
+			const srfGridMesh_t *grid = (const srfGridMesh_t *)surf->data;
+			int nv = grid->width * grid->height;
+			if ( nv < 4 ) {
+				continue;
+			}
+			for ( p = 0; p < nv; p++ ) {
+				AddPointToBounds( grid->verts[p].xyz, mins, maxs );
+				VectorAdd( normal, grid->verts[p].normal, normal );
+			}
+			if ( VectorNormalize( normal ) < 0.001f ) {
+				VectorClear( normal );
+			}
+		} else {
+			continue;
+		}
+
+		VectorAdd( mins, maxs, center );
+		VectorScale( center, 0.5f, center );
+		diag = Distance( mins, maxs );
+
+		// Filter microscopic slivers and giant non-fixture wall spans
+		if ( diag < 5.0f || diag > 220.0f ) {
+			continue;
+		}
+		if ( sh->surfaceLight <= 0.0f && diag > ( isLightName ? 110.0f : 72.0f ) ) {
+			continue; // keep secondary emissive fixtures compact so large trims/walls don't over-bloom
+		}
+
+		// Determine true lamp color from image bright-pixel / ASTC void-extent color
+		if ( img && img->hasBloomColor ) {
+			VectorCopy( img->bloomColor, col );
+		} else {
+			col[0] = 0.90f;
+			col[1] = 0.88f;
+			col[2] = 0.82f;
+		}
+		maxC = MAX( col[0], MAX( col[1], col[2] ) );
+		if ( maxC < ( sh->surfaceLight > 0.0f ? 0.18f : 0.30f ) ) {
+			continue; // dark / unlit texture
+		}
+		// Gently boost color saturation & normalize peak so warm amber, Borg green, Forge red read richly
+		luma = col[0] * 0.299f + col[1] * 0.587f + col[2] * 0.114f;
+		col[0] = luma + ( col[0] - luma ) * 1.40f;
+		col[1] = luma + ( col[1] - luma ) * 1.40f;
+		col[2] = luma + ( col[2] - luma ) * 1.40f;
+		maxC = MAX( col[0], MAX( col[1], col[2] ) );
+		if ( maxC > 0.01f ) {
+			float targetPeak = Com_Clamp( 0.55f, 1.0f, maxC * 1.25f );
+			float s = targetPeak / maxC;
+			col[0] = Com_Clamp( 0.0f, 1.0f, col[0] * s );
+			col[1] = Com_Clamp( 0.0f, 1.0f, col[1] * s );
+			col[2] = Com_Clamp( 0.0f, 1.0f, col[2] * s );
+		}
+
+		// Offset slightly into room air along surface normal for PVS cluster & clean Z-test
+		VectorMA( center, 8.0f, normal, samplePos );
+		cluster = R_WorldPointCluster( samplePos );
+		if ( cluster < 0 ) {
+			cluster = R_WorldPointCluster( center );
+		}
+
+		radius = Com_Clamp( 20.0f, 54.0f, diag * 0.48f + 12.0f );
+		if ( sh->surfaceLight > 0.0f ) {
+			float lw = Com_Clamp( 0.0f, 1.0f, sqrtf( sh->surfaceLight ) * ( 1.0f / 60.0f ) );
+			intensity = 0.62f + 0.38f * lw;
+		} else {
+			intensity = 0.58f;
+		}
+
+		// Spatially merge adjacent faces belonging to the same lamp fixture
+		for ( j = 0; j < count; j++ ) {
+			float d2 = DistanceSquared( tmp[j].origin, samplePos );
+			if ( d2 < 56.0f * 56.0f && DotProduct( tmp[j].normal, normal ) >= 0.30f ) {
+				VectorAdd( tmp[j].origin, samplePos, tmp[j].origin );
+				VectorScale( tmp[j].origin, 0.5f, tmp[j].origin );
+				tmp[j].radius = MIN( 62.0f, MAX( tmp[j].radius, radius ) + 3.0f );
+				if ( intensity > tmp[j].intensity ) {
+					tmp[j].intensity = intensity;
+					VectorCopy( col, tmp[j].color );
+				}
+				break;
+			}
+		}
+		if ( j < count ) {
+			continue;
+		}
+		if ( count >= MAX_WORLD_BLOOM_HALOS ) {
+			continue;
+		}
+
+		VectorCopy( samplePos, tmp[count].origin );
+		VectorCopy( normal, tmp[count].normal );
+		VectorCopy( col, tmp[count].color );
+		tmp[count].radius = radius;
+		tmp[count].intensity = intensity;
+		tmp[count].cluster = cluster;
+		count++;
+	}
+
+	if ( count > 0 ) {
+		s_worldData.bloomHalos = ri.Hunk_Alloc( count * sizeof( worldBloomHalo_t ), h_low );
+		Com_Memcpy( s_worldData.bloomHalos, tmp, count * sizeof( worldBloomHalo_t ) );
+		s_worldData.numBloomHalos = count;
+		ri.Printf( PRINT_DEVELOPER, "OpenHazard: extracted %i static light halos for zero-FBO fake bloom\n", count );
+	}
+}
+
+
+/*
 =================
 RE_LoadWorldMap
 
@@ -2454,8 +2704,10 @@ void RE_LoadWorldMap( const char *name ) {
 	R_LoadNodesAndLeafs( &header->lumps[LUMP_NODES], &header->lumps[LUMP_LEAFS] );
 	R_LoadSubmodels( &header->lumps[LUMP_MODELS] );
 	R_LoadVisibility( &header->lumps[LUMP_VISIBILITY] );
+
 	R_LoadEntities( &header->lumps[LUMP_ENTITIES] );
 	R_LoadLightGrid( &header->lumps[LUMP_LIGHTGRID] );
+	R_BuildWorldBloomHalos();
 
 #ifdef USE_VBO
 	R_BuildWorldVBO( s_worldData.surfaces, s_worldData.numsurfaces );

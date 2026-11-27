@@ -650,6 +650,7 @@ typedef struct shader_s {
 
 	double	clampTime;						// time this shader is clamped to - set to double for frameloss fix -EC-
 	double	timeOffset;						// current time offset for this shader - set to double for frameloss fix -EC-
+	float	surfaceLight;					// parsed q3map_surfacelight intensity (used for zero-FBO fake bloom)
 
 	struct shader_s *remappedShader;		// current shader this one is remapped too
 
@@ -721,6 +722,8 @@ typedef struct image_s {
 	// It is updated only once during image initialization.
 	VkDescriptorSet descriptor;
 	struct image_s	*normalMap;			// optional <stem>_nh normal+microAO+height companion
+	vec3_t		bloomColor;				// bright-pixel average RGB for zero-FBO fake bloom
+	qboolean	hasBloomColor;
 #else
 	GLuint		texnum;				// gl texture binding
 	GLint		internalFormat;
@@ -1059,6 +1062,15 @@ typedef struct {
 } bmodel_t;
 
 typedef struct {
+	vec3_t		origin;
+	vec3_t		normal;
+	vec3_t		color;
+	float		radius;
+	float		intensity;
+	int			cluster;
+} worldBloomHalo_t;
+
+typedef struct {
 	char		name[MAX_QPATH];		// ie: maps/tim_dm2.bsp
 	char		baseName[MAX_QPATH];	// ie: tim_dm2
 
@@ -1100,6 +1112,9 @@ typedef struct {
 
 	char		*entityString;
 	const char	*entityParsePoint;
+
+	worldBloomHalo_t *bloomHalos;
+	int			numBloomHalos;
 } world_t;
 
 //======================================================================
@@ -1336,6 +1351,7 @@ typedef struct {
 	image_t					*fogImage;
 	image_t					*dlightImage;	// inverse-quare highlight for projective adding
 	image_t					*flareImage;
+	image_t					*bloomHaloImage;	// procedural 2-lobe Gaussian glow for zero-FBO fake bloom
 	image_t					*blackImage;
 	image_t					*whiteImage;			// full of 0xff
 	image_t					*identityLightImage;	// full of tr.identityLightByte
@@ -1347,6 +1363,7 @@ typedef struct {
 	shader_t				*projectionShadowShader;
 
 	shader_t				*flareShader;
+	shader_t				*bloomHaloShader;
 	shader_t				*dlightCoronaShader;
 	shader_t				*sunShader;
 
@@ -1500,6 +1517,8 @@ extern cvar_t	*r_directPost;
 extern cvar_t	*r_vignette;
 extern cvar_t	*r_entityLighting;
 extern cvar_t	*r_dlightFlares;
+extern cvar_t	*r_fakeBloom;
+extern cvar_t	*r_fakeBloomIntensity;
 extern cvar_t	*r_normalMapping;
 extern cvar_t	*r_normalStrength;
 extern cvar_t	*r_normalSpec;
