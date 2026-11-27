@@ -925,22 +925,62 @@ level.spawnVars[], then call the class specfic spawn function
 */
 
 static void G_ApplyMissionSpawnVarFixes( void ) {
-	if ( !g_missionFixes || !g_missionFixes->integer ) {
+	const qboolean doFixes = ( g_missionFixes && g_missionFixes->integer ) ? qtrue : qfalse;
+	const qboolean doCut   = ( g_restoreCutContent && g_restoreCutContent->integer ) ? qtrue : qfalse;
+	if ( !doFixes && !doCut ) {
 		return;
 	}
 
 	const char *classname = NULL;
+	const char *targetname = NULL;
 	qboolean hasSoundSet = qfalse;
 	int i;
 
 	for ( i = 0; i < numSpawnVars; i++ ) {
 		if ( !Q_stricmp( spawnVars[i][0], "classname" ) ) {
 			classname = spawnVars[i][1];
+		} else if ( !Q_stricmp( spawnVars[i][0], "targetname" ) ) {
+			targetname = spawnVars[i][1];
 		} else if ( !Q_stricmp( spawnVars[i][0], "soundSet" ) ) {
 			hasSoundSet = qtrue;
 		}
 	}
 	if ( !classname || !classname[0] ) {
+		return;
+	}
+
+	// Cut-content restoration (voy4):
+	// - Route Cargo Bay 2 clear counter (counter2) through restored voy4/recon.ibi
+	//   (Biessman "Just making sure!" scene) before advancing to t1368 (voy4/victory.ibi).
+	// - Nudge Tuvok 52 units west behind the same cover so he does not body-block
+	//   Biessman's waypoint exit (476,-1832 -> 448,-1928).
+	// - Widen deadguyarea from waypoint_navgoal_4 (radius 4) to waypoint_navgoal (radius 16)
+	//   so Biessman reliably completes gotodeadguy beside the corpse bounding box.
+	if ( doCut && !Q_stricmp( level.mapname, "voy4" ) ) {
+		if ( !Q_stricmp( classname, "target_counter" ) &&
+		     targetname && !Q_stricmp( targetname, "counter2" ) ) {
+			for ( i = 0; i < numSpawnVars; i++ ) {
+				if ( !Q_stricmp( spawnVars[i][0], "target" ) && !Q_stricmp( spawnVars[i][1], "t1368" ) ) {
+					spawnVars[i][1] = G_NewString( "oh_voy4_recon" );
+				}
+			}
+		} else if ( !Q_stricmp( classname, "NPC_Tuvok" ) ) {
+			for ( i = 0; i < numSpawnVars; i++ ) {
+				if ( !Q_stricmp( spawnVars[i][0], "origin" ) && !Q_stricmp( spawnVars[i][1], "448 -1880 544" ) ) {
+					spawnVars[i][1] = G_NewString( "396 -1880 544" );
+				}
+			}
+		} else if ( !Q_stricmp( classname, "waypoint_navgoal_4" ) &&
+		            targetname && !Q_stricmp( targetname, "deadguyarea" ) ) {
+			for ( i = 0; i < numSpawnVars; i++ ) {
+				if ( !Q_stricmp( spawnVars[i][0], "classname" ) ) {
+					spawnVars[i][1] = G_NewString( "waypoint_navgoal" );
+				}
+			}
+		}
+	}
+
+	if ( !doFixes ) {
 		return;
 	}
 
@@ -1304,7 +1344,31 @@ void G_SpawnEntitiesFromString( const char *entityString ) {
 	while( G_ParseSpawnVars( &entities ) ) 
 	{
 		G_SpawnGEntityFromSpawnVars();
-	}	
+	}
+
+	// Spawn companion entities for restored cut-content scenes
+	if ( g_restoreCutContent && g_restoreCutContent->integer && !Q_stricmp( level.mapname, "voy4" ) )
+	{
+		static const char voy4ReconEnts[] =
+			"{\n"
+			"\"classname\" \"target_scriptrunner\"\n"
+			"\"targetname\" \"oh_voy4_recon\"\n"
+			"\"usescript\" \"voy4/recon\"\n"
+			"\"origin\" \"200 -1500 540\"\n"
+			"}\n"
+			"{\n"
+			"\"classname\" \"target_delay\"\n"
+			"\"targetname\" \"munronear\"\n"
+			"\"target\" \"t1368\"\n"
+			"\"wait\" \"7\"\n"
+			"\"origin\" \"268 -1428 532\"\n"
+			"}\n";
+		char *extra = (char *)voy4ReconEnts;
+		while ( G_ParseSpawnVars( &extra ) )
+		{
+			G_SpawnGEntityFromSpawnVars();
+		}
+	}
 
 	//Search the entities for precache information
 	G_ParsePrecaches();

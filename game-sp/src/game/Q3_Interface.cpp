@@ -2220,6 +2220,23 @@ static void Q3_SetNavGoal( int entID, const char *name )
 	gentity_t	*ent  = &g_entities[ entID ];
 	vec3_t		goalPos;
 
+	// Cut-content restoration (voy4/recon.ibi): uncrouch Biessman right when he starts
+	// walking to deadguyarea (voy4/boxdefender1 left SCF_CROUCHED set).
+	if ( g_restoreCutContent && g_restoreCutContent->integer &&
+	     ent && ent->NPC && name && !Q_stricmp( name, "deadguyarea" ) )
+	{
+		ent->NPC->scriptFlags &= ~SCF_CROUCHED;
+		ent->NPC->duckDebounceTime = 0;
+		ent->svFlags |= SVF_IGNORE_ENEMIES;
+		ent->enemy = NULL;
+		if ( ent->client )
+		{
+			ent->client->ps.pm_flags &= ~PMF_DUCKED;
+			ent->client->ps.legsAnimTimer = 0;
+			ent->client->ps.torsoAnimTimer = 0;
+		}
+	}
+
 	//Get the position of the goal
 	if ( TAG_GetOrigin2( NULL, name, goalPos ) == false )
 	{

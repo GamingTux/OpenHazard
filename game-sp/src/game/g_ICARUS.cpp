@@ -98,6 +98,28 @@ int ICARUS_RunScript( gentity_t *ent, const char *name )
 	if S_FAILED(_runRes)
 		return false;
 
+	// Cut-content restoration (voy4/recon.ibi): Biessman starts crouched via voy4/boxdefender1,
+	// and voy4/recon forgot to uncrouch/clear combat state before walking to deadguyarea.
+	if ( g_restoreCutContent && g_restoreCutContent->integer &&
+	     ( !Q_stricmp( name, Q3_SCRIPT_DIR "/voy4/recon" ) || !Q_stricmp( name, "voy4/recon" ) ) )
+	{
+		gentity_t *biess = G_Find( NULL, FOFS( targetname ), "biessman" );
+		if ( !biess )
+			biess = G_Find( NULL, FOFS( script_targetname ), "biessman" );
+		if ( biess && biess->NPC )
+		{
+			biess->NPC->scriptFlags &= ~SCF_CROUCHED;
+			biess->svFlags |= SVF_IGNORE_ENEMIES;
+			biess->enemy = NULL;
+			if ( biess->client )
+			{
+				biess->client->ps.pm_flags &= ~PMF_DUCKED;
+				biess->client->ps.legsAnimTimer = 0;
+				biess->client->ps.torsoAnimTimer = 0;
+			}
+		}
+	}
+
 	Q3_DebugPrint( WL_VERBOSE, "Script %s executed by %s %s\n", (char *) name, ent->classname, ent->targetname );
 
 	return true;

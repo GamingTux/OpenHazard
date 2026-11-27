@@ -180,6 +180,7 @@ extern	cvar_t	*g_virtualVoyager;
 extern	cvar_t	*g_teamKnockback;
 extern	cvar_t	*g_fixFreezeBorg1;
 extern	cvar_t	*g_missionFixes;
+extern	cvar_t	*g_restoreCutContent;
 extern	cvar_t	*g_snapVelocity;
 extern	cvar_t	*g_showPaths;
 
