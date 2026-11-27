@@ -200,7 +200,10 @@ static sfxHandle_t S_AL_BufferFind(const char *filename)
 	}
 
 	if ( !filename[0] ) {
-		Com_Printf( S_COLOR_YELLOW "WARNING: Sound name is empty\n" );
+		// Match snd_dma.c (S_FindName): empty sound fields (e.g. breakables without
+		// a `sounds` key -> EV_GENERAL_SOUND empty configstring) legitimately return
+		// handle 0; keep the warning developer-only so it does not spam the HUD.
+		Com_DPrintf( S_COLOR_YELLOW "WARNING: Sound name is empty\n" );
 		return 0;
 	}
 
