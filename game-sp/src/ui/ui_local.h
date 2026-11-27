@@ -1244,6 +1244,7 @@ typedef enum{
 	// video menu's 4:3/16:9 aspect toggle. Inserting mid-list would shift every later MNT_ value.
 	MNT_ASPECT_4_3,
 	MNT_ASPECT_16_9,
+	MNT_OH_FOOTNOTE,
 	MNT_MAX
 
 } menuNormalTextType_t;
@@ -1542,6 +1543,17 @@ typedef enum{
 	// "?" and their labels are assigned in C (UI_ControlsMouse menu init). Adding them mid-list would
 	// shift every later enum and misalign the positionally-parsed button-text data.
 	MBT_GAMEPADLOOK,
+	MBT_OPENHAZARD,
+	MBT_OH_MSAA,
+	MBT_OH_RENDERPATH,
+	MBT_OH_BLOOM,
+	MBT_OH_PRESENT,
+	MBT_OH_ASTC,
+	MBT_OH_LODBIAS,
+	MBT_OH_DLIGHT,
+	MBT_OH_FOV,
+	MBT_OH_AUTOTUNE,
+	MBT_OH_HRTF,
 	MBT_MAX
 } menuButtonTextType_t;
 
@@ -1989,6 +2001,7 @@ extern void UI_UpdateConnectionMessageString( char *string );
 #define MENU_CONTROLS_MOUSE			12
 #define MENU_CONTROLS_OTHER			13
 #define MENU_VIDEODATA				14
+#define MENU_OPENHAZARD				15
 
 
 extern void UI_ControlsMenu( void );
@@ -2013,6 +2026,8 @@ extern void UI_CDKeyMenu( void );
 // ui_fonts.c
 //
 extern void UI_FontsMenu( void );
+extern void UI_OpenHazardMenu( void );
+extern void UI_OpenHazard_InitLabels( void );
 
 //
 // ui_sound.c
@@ -2168,6 +2183,7 @@ extern void			UI_ControlsMouseJoyStick_Cache(void);
 extern void			UI_CrewMenu_Cache(void);
 extern void			UI_SaveGameMenu_Cache(void);
 extern void			UI_FontsMenu_Cache(void);
+extern void			UI_OpenHazardMenu_Cache(void);
 extern void			UI_NewGameMenu_Cache(void); 
 extern void			UI_SoundMenu_Cache(void);
 extern void			UI_VideoDataMenu_Cache(void);

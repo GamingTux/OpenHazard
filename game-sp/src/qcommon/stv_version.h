@@ -1,6 +1,6 @@
 // Current version of the single player game
 
-#define	Q3_VERSION		"Elite Reinforce v0.7"
+#define	Q3_VERSION		"OpenHazard"
 
 // end
 

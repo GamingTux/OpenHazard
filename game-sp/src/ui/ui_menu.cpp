@@ -2562,20 +2562,12 @@ UI_Setup_MenuButtons
 */
 void UI_Setup_MenuButtons(void)
 {
-	int i,max;
+	int i;
 
 	ui.R_SetColor( colorTable[CT_DKPURPLE1]);
 
-	if (ui.Cvar_VariableValue("developer"))	// Show fonts button
-	{
-		max=6;
-	}
-	else
-	{
-		max=5;
-	}
-
-	for (i=0;i<max;++i)
+	// Always draw all 6 Setup top-bar left end-caps (slot 6 = OpenHazard settings).
+	for (i=0;i<6;++i)
 	{
 		UI_DrawHandlePic(setup_menubuttons[i][0] - 14,setup_menubuttons[i][1], MENU_BUTTON_MED_HEIGHT, MENU_BUTTON_MED_HEIGHT, uis.graphicButtonLeftEnd);
 	}

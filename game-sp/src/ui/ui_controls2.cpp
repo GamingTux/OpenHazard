@@ -222,6 +222,7 @@ static menubitmap_s			s_controls_sound;
 static menubitmap_s			s_controls_game;
 static menubitmap_s			s_controls_cdkey;
 static menubitmap_s			s_controls_fonts;
+static menubitmap_s			s_controls_openhazard;
 static menubitmap_s			s_controls_weapon;
 static menubitmap_s			s_controls_quickkey;
 static menubitmap_s			s_controls_look;
@@ -289,6 +290,7 @@ static menubitmap_s			s_controls_default_no;
 #define ID_GAMEOPTIONS	104
 #define ID_CDKEY		105
 #define ID_FONTS		106
+#define ID_OPENHAZARD	107
 
 
 #define ID_CONTROLSQUICKKEYS	200
@@ -1606,6 +1608,11 @@ static void Controls_MenuEventNew (void* ptr, int event)
 		case ID_FONTS:
 			UI_PopMenu();			// Get rid of whatever is ontop
 			UI_FontsMenu();			// Move to the Fonts Menu
+			break;
+
+		case ID_OPENHAZARD:
+			UI_PopMenu();			// Get rid of whatever is ontop
+			UI_OpenHazardMenu();	// Move to the OpenHazard Settings Menu
 			break;
 
 		case ID_MAINMENU:
@@ -3461,6 +3468,9 @@ SetupMenu_TopButtons
 
 void SetupMenu_TopButtons(menuframework_s *menu,int menuType,menuaction_s *s_video_apply_action)
 {
+	const qboolean useApplyCb = (menuType == MENU_VIDEODATA || menuType == MENU_OPENHAZARD) ? qtrue : qfalse;
+
+	UI_OpenHazard_InitLabels();
 	vid_apply_action = s_video_apply_action;
 
 	s_controls_mainmenu.generic.type			= MTYPE_BITMAP;      
@@ -3469,14 +3479,7 @@ void SetupMenu_TopButtons(menuframework_s *menu,int menuType,menuaction_s *s_vid
 	s_controls_mainmenu.generic.y				= 136;
 	s_controls_mainmenu.generic.name			= GRAPHIC_BUTTONRIGHT;
 	s_controls_mainmenu.generic.id				= ID_MAINMENU;
-	if (menuType != MENU_VIDEODATA)
-	{
-		s_controls_mainmenu.generic.callback	= Controls_MenuEventNew;
-	}
-	else	// How do you spell HACK?
-	{
-		s_controls_mainmenu.generic.callback	= Controls_MenuEventVideo;
-	}
+	s_controls_mainmenu.generic.callback		= useApplyCb ? Controls_MenuEventVideo : Controls_MenuEventNew;
 
 	s_controls_mainmenu.width					= MENU_BUTTON_MED_WIDTH;
 	s_controls_mainmenu.height					= MENU_BUTTON_MED_HEIGHT;
@@ -3501,14 +3504,7 @@ void SetupMenu_TopButtons(menuframework_s *menu,int menuType,menuaction_s *s_vid
 	s_controls_controls.generic.y		= setup_menubuttons[0][1];
 	s_controls_controls.generic.name	= GRAPHIC_BUTTONRIGHT;
 	s_controls_controls.generic.id		= ID_CONTROLS;
-	if (menuType != MENU_VIDEODATA)
-	{
-		s_controls_controls.generic.callback	= Controls_MenuEventNew;
-	}
-	else	// How do you spell HACK?
-	{
-		s_controls_controls.generic.callback	= Controls_MenuEventVideo;
-	}
+	s_controls_controls.generic.callback = useApplyCb ? Controls_MenuEventVideo : Controls_MenuEventNew;
 	s_controls_controls.width			= MENU_BUTTON_MED_WIDTH;
 	s_controls_controls.height			= MENU_BUTTON_MED_HEIGHT;
 	s_controls_controls.color			= CT_DKPURPLE1;
@@ -3525,14 +3521,7 @@ void SetupMenu_TopButtons(menuframework_s *menu,int menuType,menuaction_s *s_vid
 	s_controls_video.generic.y			= setup_menubuttons[1][1];
 	s_controls_video.generic.name		= GRAPHIC_BUTTONRIGHT;
 	s_controls_video.generic.id			= ID_VIDEO;
-	if (menuType != MENU_VIDEODATA)
-	{
-		s_controls_video.generic.callback	= Controls_MenuEventNew;
-	}
-	else
-	{
-		s_controls_video.generic.callback	= Controls_MenuEventVideo;
-	}
+	s_controls_video.generic.callback	= useApplyCb ? Controls_MenuEventVideo : Controls_MenuEventNew;
 	s_controls_video.width				= MENU_BUTTON_MED_WIDTH;
 	s_controls_video.height				= MENU_BUTTON_MED_HEIGHT;
 	s_controls_video.color				= CT_DKPURPLE1;
@@ -3549,14 +3538,7 @@ void SetupMenu_TopButtons(menuframework_s *menu,int menuType,menuaction_s *s_vid
 	s_controls_sound.generic.y			= setup_menubuttons[2][1];
 	s_controls_sound.generic.name		= GRAPHIC_BUTTONRIGHT;
 	s_controls_sound.generic.id			= ID_SOUND;
-	if (menuType != MENU_VIDEODATA)
-	{
-		s_controls_sound.generic.callback	= Controls_MenuEventNew;
-	}
-	else
-	{
-		s_controls_sound.generic.callback	= Controls_MenuEventVideo;
-	}
+	s_controls_sound.generic.callback	= useApplyCb ? Controls_MenuEventVideo : Controls_MenuEventNew;
 	s_controls_sound.width				= MENU_BUTTON_MED_WIDTH;
 	s_controls_sound.height				= MENU_BUTTON_MED_HEIGHT;
 	s_controls_sound.color				= CT_DKPURPLE1;
@@ -3573,14 +3555,7 @@ void SetupMenu_TopButtons(menuframework_s *menu,int menuType,menuaction_s *s_vid
 	s_controls_game.generic.y			= setup_menubuttons[3][1];
 	s_controls_game.generic.name		=GRAPHIC_BUTTONRIGHT;
 	s_controls_game.generic.id			= ID_GAMEOPTIONS;
-	if (menuType != MENU_VIDEODATA)
-	{
-		s_controls_game.generic.callback	= Controls_MenuEventNew;
-	}
-	else
-	{
-		s_controls_game.generic.callback	= Controls_MenuEventVideo;
-	}
+	s_controls_game.generic.callback	= useApplyCb ? Controls_MenuEventVideo : Controls_MenuEventNew;
 	s_controls_game.width				= MENU_BUTTON_MED_WIDTH;
 	s_controls_game.height				= MENU_BUTTON_MED_HEIGHT;
 	s_controls_game.color				= CT_DKPURPLE1;
@@ -3614,14 +3589,7 @@ void SetupMenu_TopButtons(menuframework_s *menu,int menuType,menuaction_s *s_vid
 	s_controls_default.generic.y		= setup_menubuttons[4][1];
 	s_controls_default.generic.name		= GRAPHIC_BUTTONRIGHT;
 	s_controls_default.generic.id		= ID_CONTROLSDEFAULT;
-	if (menuType != MENU_VIDEODATA)
-	{
-		s_controls_default.generic.callback	= Controls_MenuEventNew;
-	}
-	else
-	{
-		s_controls_default.generic.callback	= Controls_MenuEventVideo;
-	}
+	s_controls_default.generic.callback	= useApplyCb ? Controls_MenuEventVideo : Controls_MenuEventNew;
 	s_controls_default.width			= MENU_BUTTON_MED_WIDTH;
 	s_controls_default.height			= MENU_BUTTON_MED_HEIGHT;
 	s_controls_default.color			= CT_DKPURPLE1;
@@ -3632,29 +3600,22 @@ void SetupMenu_TopButtons(menuframework_s *menu,int menuType,menuaction_s *s_vid
 	s_controls_default.textcolor		= CT_BLACK;
 	s_controls_default.textcolor2		= CT_WHITE;
 
-	s_controls_fonts.generic.type		= MTYPE_BITMAP;      
-	s_controls_fonts.generic.flags	= QMF_HIGHLIGHT_IF_FOCUS;
-	s_controls_fonts.generic.x		= setup_menubuttons[5][0];
-	s_controls_fonts.generic.y		= setup_menubuttons[5][1];
-	s_controls_fonts.generic.name	= GRAPHIC_BUTTONRIGHT;
-	s_controls_fonts.generic.id		= ID_FONTS;
-	if (menuType != MENU_VIDEODATA)
-	{
-		s_controls_fonts.generic.callback	= Controls_MenuEventNew;
-	}
-	else
-	{
-		s_controls_fonts.generic.callback	= Controls_MenuEventVideo;
-	}
-	s_controls_fonts.width			= MENU_BUTTON_MED_WIDTH;
-	s_controls_fonts.height			= MENU_BUTTON_MED_HEIGHT;
-	s_controls_fonts.color			= CT_DKPURPLE1;
-	s_controls_fonts.color2			= CT_LTPURPLE1;
-	s_controls_fonts.textX			= 5;
-	s_controls_fonts.textY			= 2;
-	s_controls_fonts.textEnum		= MBT_FONTS;
-	s_controls_fonts.textcolor		= CT_BLACK;
-	s_controls_fonts.textcolor2		= CT_WHITE;
+	s_controls_openhazard.generic.type		= MTYPE_BITMAP;
+	s_controls_openhazard.generic.flags		= QMF_HIGHLIGHT_IF_FOCUS;
+	s_controls_openhazard.generic.x			= setup_menubuttons[5][0];
+	s_controls_openhazard.generic.y			= setup_menubuttons[5][1];
+	s_controls_openhazard.generic.name		= GRAPHIC_BUTTONRIGHT;
+	s_controls_openhazard.generic.id		= ID_OPENHAZARD;
+	s_controls_openhazard.generic.callback	= useApplyCb ? Controls_MenuEventVideo : Controls_MenuEventNew;
+	s_controls_openhazard.width				= MENU_BUTTON_MED_WIDTH;
+	s_controls_openhazard.height			= MENU_BUTTON_MED_HEIGHT;
+	s_controls_openhazard.color				= CT_DKPURPLE1;
+	s_controls_openhazard.color2			= CT_LTPURPLE1;
+	s_controls_openhazard.textX				= 5;
+	s_controls_openhazard.textY				= 2;
+	s_controls_openhazard.textEnum			= MBT_OPENHAZARD;
+	s_controls_openhazard.textcolor			= CT_BLACK;
+	s_controls_openhazard.textcolor2		= CT_WHITE;
 
 	Menu_AddItem( menu, ( void * )&s_controls_mainmenu);
 	Menu_AddItem( menu, ( void * )&s_controls_controls);
@@ -3662,6 +3623,7 @@ void SetupMenu_TopButtons(menuframework_s *menu,int menuType,menuaction_s *s_vid
 	Menu_AddItem( menu, ( void * )&s_controls_sound);
 	Menu_AddItem( menu, ( void * )&s_controls_game);
 	Menu_AddItem( menu, ( void * )&s_controls_default);
+	Menu_AddItem( menu, ( void * )&s_controls_openhazard);
 //	Menu_AddItem( menu, ( void * )&s_controls_cdkey);
 
 	switch (menuType)
@@ -3702,12 +3664,12 @@ void SetupMenu_TopButtons(menuframework_s *menu,int menuType,menuaction_s *s_vid
 		s_controls_fonts.textcolor2		= CT_LTGOLD1;	
 		s_controls_fonts.generic.flags	= QMF_GRAYED;
 		break;
+	case MENU_OPENHAZARD :
+		s_controls_openhazard.textcolor		= CT_LTGOLD1;
+		s_controls_openhazard.textcolor2	= CT_LTGOLD1;
+		s_controls_openhazard.generic.flags	= QMF_GRAYED;
+		break;
 	}
-
-
-	if (ui.Cvar_VariableValue("developer"))
-		Menu_AddItem( menu, ( void * )&s_controls_fonts);
-
 }
 
 /*

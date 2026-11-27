@@ -1173,6 +1173,7 @@ static void UI_Cache_f( void ) {
 	UI_CrewMenu_Cache();
 	UI_SaveGameMenu_Cache(); 
 	UI_FontsMenu_Cache();
+	UI_OpenHazardMenu_Cache();
 	UI_NewGameMenu_Cache();
 	Menu_Cache();
 	UI_SoundMenu_Cache();
@@ -1239,6 +1240,11 @@ static qboolean UI_ConsoleCommand( void ) {
 
 	if ( Q_stricmp (cmd, "ui_cdkey") == 0 ) {
 //		UI_CDKeyMenu_f();
+		return qtrue;
+	}
+
+	if ( Q_stricmp (cmd, "ui_openhazard") == 0 ) {
+		UI_OpenHazardMenu();
 		return qtrue;
 	}
 
