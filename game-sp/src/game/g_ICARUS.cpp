@@ -22,10 +22,27 @@ gets the named script from the cache or disk if not already loaded
 =============
 */
 
+static const char *ICARUS_ApplyScriptNameFixes( const char *name )
+{
+	if ( !name || !g_missionFixes || !g_missionFixes->integer )
+		return name;
+
+	// Retail borg3/battle_catwalkborg_wakeup.ibi sets hallborg1..3 pain/deathscript
+	// to nonexistent "borg3/hb_wakeup4"; actual sibling wakeup script is battle_hallborg_wakeup.
+	if ( !Q_stricmp( name, Q3_SCRIPT_DIR "/borg3/hb_wakeup4" ) )
+		return Q3_SCRIPT_DIR "/borg3/battle_hallborg_wakeup";
+	if ( !Q_stricmp( name, "borg3/hb_wakeup4" ) )
+		return "borg3/battle_hallborg_wakeup";
+
+	return name;
+}
+
 int ICARUS_GetScript( const char *name, char **buf )
 {
 	bufferlist_t::iterator		ei;
 	//Make sure the caller is valid
+
+	name = ICARUS_ApplyScriptNameFixes( name );
 
 	//Attempt to retrieve a precached script
 	ei = ICARUS_BufferList.find( (char *) name );
@@ -268,6 +285,8 @@ bool ICARUS_RegisterScript( const char *name, bool bCalledDuringInterrogate /* =
 	char		*buffer = NULL;	// lose compiler warning about uninitialised vars
 	long		length;
 
+	name = ICARUS_ApplyScriptNameFixes( name );
+
 	//Make sure this isn't already cached
 	ei = ICARUS_BufferList.find( (char *) name );
 
@@ -345,6 +364,8 @@ void ICARUS_InterrogateScript( const char *filename )
 	CBlockStream	stream;
 	CBlockMember	*blockMember;
 	CBlock			block;
+
+	filename = ICARUS_ApplyScriptNameFixes( filename );
 
 	if (!Q_stricmp(filename,"NULL") || !Q_stricmp(filename,"default"))
 		return;

@@ -924,9 +924,78 @@ level.spawnVars[], then call the class specfic spawn function
 ===================
 */
 
+static void G_ApplyMissionSpawnVarFixes( void ) {
+	if ( !g_missionFixes || !g_missionFixes->integer ) {
+		return;
+	}
+
+	const char *classname = NULL;
+	qboolean hasSoundSet = qfalse;
+	int i;
+
+	for ( i = 0; i < numSpawnVars; i++ ) {
+		if ( !Q_stricmp( spawnVars[i][0], "classname" ) ) {
+			classname = spawnVars[i][1];
+		} else if ( !Q_stricmp( spawnVars[i][0], "soundSet" ) ) {
+			hasSoundSet = qtrue;
+		}
+	}
+	if ( !classname || !classname[0] ) {
+		return;
+	}
+
+	for ( i = 0; i < numSpawnVars; i++ ) {
+		const char *key = spawnVars[i][0];
+		const char *val = spawnVars[i][1];
+
+		// 1. voy4 & tour/deck08: duplicate target_level_change (gotobrig) has mapname="brig"
+		//    instead of "_brig", breaking friendly-fire brig transitions.
+		if ( !Q_stricmp( classname, "target_level_change" ) &&
+		     !Q_stricmp( key, "mapname" ) && !Q_stricmp( val, "brig" ) ) {
+			spawnVars[i][1] = G_NewString( "_brig" );
+			continue;
+		}
+
+		// 2. scav2: two NPC_klingon entities have paintarget="scav2/useupperklingons"
+		//    instead of "useupperklingons" (script path typed into targetname field).
+		if ( !Q_stricmpn( classname, "NPC_", 4 ) &&
+		     !Q_stricmp( key, "paintarget" ) && !Q_stricmp( val, "scav2/useupperklingons" ) ) {
+			spawnVars[i][1] = G_NewString( "useupperklingons" );
+			continue;
+		}
+
+		// 3. tour/deck10: 15 func_breakable glass panels reference nonexistent glassbreak2.wav.
+		if ( !Q_stricmp( classname, "func_breakable" ) &&
+		     !Q_stricmp( key, "noise" ) && !Q_stricmp( val, "sound/weapons/explosions/glassbreak2.wav" ) ) {
+			spawnVars[i][1] = G_NewString( "sound/weapons/explosions/glassbreak1.wav" );
+			continue;
+		}
+
+		// 4. tour/deck10 & voy8: func_usable has bmodelset "voysmallplat" in "noise" instead of "soundSet".
+		if ( !Q_stricmp( classname, "func_usable" ) && !hasSoundSet &&
+		     !Q_stricmp( key, "noise" ) && !Q_stricmp( val, "voysmallplat" ) ) {
+			spawnVars[i][0] = G_NewString( "soundSet" );
+			hasSoundSet = qtrue;
+			continue;
+		}
+
+		// 5. stasis3: NPC_Telsia has a stray deleted mapobject model ("plugin_floor2.md3").
+		if ( !Q_stricmp( classname, "NPC_Telsia" ) &&
+		     !Q_stricmp( key, "model" ) && !Q_stricmp( val, "models/mapobjects/stasis/plugin_floor2.md3" ) ) {
+			spawnVars[i][0] = spawnVars[numSpawnVars - 1][0];
+			spawnVars[i][1] = spawnVars[numSpawnVars - 1][1];
+			numSpawnVars--;
+			i--;
+			continue;
+		}
+	}
+}
+
 void G_SpawnGEntityFromSpawnVars( void ) {
 	int			i;
 	gentity_t	*ent;
+
+	G_ApplyMissionSpawnVarFixes();
 
 	// get the next free entity
 	ent = G_Spawn();
