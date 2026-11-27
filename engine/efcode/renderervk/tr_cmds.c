@@ -447,7 +447,10 @@ void RE_EndFrame( int *frontEndMsec, int *backEndMsec ) {
 		|| r_dither->modified
 		|| r_bloom->modified
 		|| r_bloom_threshold->modified
-		|| r_bloom_intensity->modified ) {
+		|| r_bloom_intensity->modified
+		|| r_tonemap->modified
+		|| r_sharpen->modified
+		|| r_ssao_intensity->modified ) {
 
 		// texturemode stuff
 		if ( r_textureMode->modified ) {
@@ -470,6 +473,9 @@ void RE_EndFrame( int *frontEndMsec, int *backEndMsec ) {
 		r_bloom->modified = qfalse;
 		r_bloom_threshold->modified = qfalse;
 		r_bloom_intensity->modified = qfalse;
+		r_tonemap->modified = qfalse;
+		r_sharpen->modified = qfalse;
+		r_ssao_intensity->modified = qfalse;
 #endif
 
 		ri.Cvar_ResetGroup( CVG_RENDERER, qtrue /* reset modified flags */ );

@@ -99,6 +99,10 @@ cvar_t	*r_bloom_threshold_mode;
 cvar_t	*r_bloom_modulate;
 cvar_t	*r_bloom_downscale;
 cvar_t	*r_mipLodBias;
+cvar_t	*r_tonemap;
+cvar_t	*r_sharpen;
+cvar_t	*r_ssao;
+cvar_t	*r_ssao_intensity;
 cvar_t	*r_renderWidth;
 cvar_t	*r_renderHeight;
 cvar_t	*r_renderScale;
@@ -1941,6 +1945,19 @@ static void R_Register( void )
 	r_mipLodBias = ri.Cvar_Get( "r_mipLodBias", "-0.35", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_mipLodBias, "-1.0", "1.0", CV_FLOAT );
 	ri.Cvar_SetDescription( r_mipLodBias, "Hardware texture sampler mipmap LOD bias when anisotropic filtering is active (negative = crisper distant HD textures, 0 = neutral)." );
+
+	r_tonemap = ri.Cvar_Get( "r_tonemap", "0", CVAR_ARCHIVE_ND );
+	ri.Cvar_CheckRange( r_tonemap, "0", "1", CV_INTEGER );
+	ri.Cvar_SetDescription( r_tonemap, "Filmic highlight roll-off tonemapping in post-processing (requires \\r_fbo 1):\n 0: Off (classic)\n 1: Filmic highlight roll-off (recommended with HDR / bloom)" );
+	r_sharpen = ri.Cvar_Get( "r_sharpen", "0.0", CVAR_ARCHIVE_ND );
+	ri.Cvar_CheckRange( r_sharpen, "0.0", "1.0", CV_FLOAT );
+	ri.Cvar_SetDescription( r_sharpen, "AMD FidelityFX Contrast Adaptive Sharpening (CAS) strength in post-processing (0.0 = off, 0.35 = subtle, 0.70 = crisp; requires \\r_fbo 1)." );
+	r_ssao = ri.Cvar_Get( "r_ssao", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
+	ri.Cvar_CheckRange( r_ssao, "0", "1", CV_INTEGER );
+	ri.Cvar_SetDescription( r_ssao, "Half-resolution Screen-Space Ambient Occlusion (SSAO) contact shadows (requires \\r_fbo 1; auto-disabled on Pi 4/5 when \\r_gpuAutoTune 1)." );
+	r_ssao_intensity = ri.Cvar_Get( "r_ssao_intensity", "0.75", CVAR_ARCHIVE_ND );
+	ri.Cvar_CheckRange( r_ssao_intensity, "0.1", "1.5", CV_FLOAT );
+	ri.Cvar_SetDescription( r_ssao_intensity, "Strength of Screen-Space Ambient Occlusion darkening (requires \\r_ssao 1)." );
 
 	r_ext_multisample = ri.Cvar_Get( "r_ext_multisample", "4", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_ext_multisample, "0", "64", CV_INTEGER );

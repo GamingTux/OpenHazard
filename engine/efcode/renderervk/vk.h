@@ -52,7 +52,7 @@
 #define USE_DEDICATED_ALLOCATION
 #endif
 //#define MIN_IMAGE_ALIGN (128*1024)
-#define MAX_ATTACHMENTS_IN_POOL (8+VK_NUM_BLOOM_PASSES*2) // depth + msaa + msaa-resolve + depth-resolve + screenmap.msaa + screenmap.resolve + screenmap.depth + bloom_extract + blur pairs
+#define MAX_ATTACHMENTS_IN_POOL (10+VK_NUM_BLOOM_PASSES*2) // depth + msaa + msaa-resolve + depth-resolve + screenmap.msaa + screenmap.resolve + screenmap.depth + bloom_extract + blur pairs + ssao[2]
 
 #define VK_DESC_STORAGE      0
 #define VK_DESC_UNIFORM      0
@@ -419,6 +419,7 @@ typedef struct {
 		VkRenderPass bloom_extract;
 		VkRenderPass blur[VK_NUM_BLOOM_PASSES*2]; // horizontal-vertical pairs
 		VkRenderPass post_bloom;
+		VkRenderPass ssao;
 	} render_pass;
 
 	VkDescriptorPool descriptor_pool;
@@ -430,8 +431,10 @@ typedef struct {
 	VkPipelineLayout pipeline_layout_storage;	// flare test shader layout
 	VkPipelineLayout pipeline_layout_post_process;	// post-processing
 	VkPipelineLayout pipeline_layout_blend;		// post-processing
+	VkPipelineLayout pipeline_layout_ssao;		// SSAO (1 sampler + 16-byte push constants)
 
 	VkDescriptorSet color_descriptor;
+	VkDescriptorSet depth_descriptor;
 
 	VkImage color_image;
 	VkImageView color_image_view;
@@ -441,8 +444,13 @@ typedef struct {
 
 	VkDescriptorSet bloom_image_descriptor[1+VK_NUM_BLOOM_PASSES*2];
 
+	VkImage ssao_image[2];
+	VkImageView ssao_image_view[2];
+	VkDescriptorSet ssao_descriptor[2];
+
 	VkImage depth_image;
 	VkImageView depth_image_view;
+	VkImageView depth_sample_view;
 
 	VkImage msaa_image;
 	VkImageView msaa_image_view;
@@ -474,6 +482,7 @@ typedef struct {
 		VkFramebuffer screenmap;
 		VkFramebuffer capture;
 		VkFramebuffer post_bloom; // single-sample att0-only target for the bloom composite (MSAA-safe)
+		VkFramebuffer ssao[2];
 	} framebuffers;
 
 #ifdef USE_UPLOAD_QUEUE
@@ -541,6 +550,10 @@ typedef struct {
 
 		VkShaderModule gamma_fs;
 		VkShaderModule gamma_vs;
+		VkShaderModule ssao_fs;
+		VkShaderModule ssao_ms_fs;
+		VkShaderModule ssao_blur_fs;
+		VkShaderModule ssao_blend_fs;
 
 		VkShaderModule fog_fs;
 		VkShaderModule fog_vs;
@@ -614,6 +627,9 @@ typedef struct {
 	VkPipeline bloom_extract_pipeline;
 	VkPipeline blur_pipeline[VK_NUM_BLOOM_PASSES*2]; // horizontal & vertical pairs
 	VkPipeline bloom_blend_pipeline;
+	VkPipeline ssao_pipeline;
+	VkPipeline ssao_blur_pipeline;
+	VkPipeline ssao_blend_pipeline;
 
 	uint32_t frame_count;
 	qboolean active;
@@ -632,6 +648,7 @@ typedef struct {
 	VkFormat capture_format;
 	VkFormat depth_format;
 	VkFormat bloom_format;
+	VkFormat ssao_format;
 
 	VkImageLayout initSwapchainLayout;
 
@@ -640,6 +657,7 @@ typedef struct {
 	qboolean blitEnabled;
 	qboolean msaaActive;
 	qboolean bloomActive;
+	qboolean ssaoActive;
 	uint32_t bloomDownscale;
 
 	qboolean offscreenRender;

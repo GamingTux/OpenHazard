@@ -1198,7 +1198,7 @@ static const void *RB_StretchPic( const void *data ) {
 	RB_SetGL2D();
 
 #ifdef USE_VULKAN
-	if ( r_bloom->integer ) {
+	if ( vk.bloomActive || vk.ssaoActive ) {
 		vk_bloom();
 	}
 #endif
@@ -1708,7 +1708,7 @@ static const void *RB_FinishBloom( const void *data )
 	RB_EndSurface();
 
 #ifdef USE_VULKAN
-	if ( r_bloom->integer ) {
+	if ( vk.bloomActive || vk.ssaoActive ) {
 		vk_bloom();
 	}
 #endif
