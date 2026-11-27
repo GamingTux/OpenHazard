@@ -18,14 +18,13 @@ layout(constant_id = 13) const float ssaoIntensity = 0.75;
 layout(location = 0) in vec2 frag_tex_coord;
 layout(location = 0) out vec4 out_color;
 
-float sampleRawDepth(vec2 uv, ivec2 texSize) {
-	vec2 cuv = clamp(uv, vec2(0.0), vec2(1.0));
-#ifdef USE_MSAA
-	ivec2 ic = clamp(ivec2(cuv * vec2(texSize)), ivec2(0), texSize - ivec2(1));
-	return texelFetch(depthTex, ic, 0).r;
-#else
-	return texture(depthTex, cuv).r;
-#endif
+float fetchRawDepth(ivec2 ic, ivec2 texSize) {
+	ivec2 c = clamp(ic, ivec2(0), texSize - ivec2(1));
+	return texelFetch(depthTex, c, 0).r;
+}
+
+vec2 uvFromTexel(ivec2 ic, vec2 invSize) {
+	return (vec2(ic) + 0.5) * invSize;
 }
 
 // Reversed-Z Vulkan perspective linearization matching tr_main.c:
@@ -48,7 +47,14 @@ void main() {
 #endif
 	vec2 invSize = 1.0 / vec2(texSize);
 
-	float z0 = sampleRawDepth(frag_tex_coord, texSize);
+	// Snap to exact integer depth-texel coordinates before stepping to neighbors.
+	// Using float UV +/- invSize with texelFetch(ivec2(uv * texSize)) suffers IEEE-754
+	// boundary truncation (167/540 broken scanlines at 1080p) where icD == ic0, collapsing
+	// dPdy and tilting the reconstructed normal toward the camera (horizontal floor bands).
+	ivec2 ic0 = clamp(ivec2(floor(frag_tex_coord * vec2(texSize))), ivec2(0), texSize - ivec2(1));
+	vec2 uv0 = uvFromTexel(ic0, invSize);
+
+	float z0 = fetchRawDepth(ic0, texSize);
 	if (z0 <= 1e-5) {
 		// Skybox / far plane: no ambient occlusion
 		out_color = vec4(1.0, pc.zFar, 0.0, 1.0);
@@ -62,25 +68,25 @@ void main() {
 		return;
 	}
 
-	vec3 p0 = viewPosFromUV(frag_tex_coord, d0);
+	vec3 p0 = viewPosFromUV(uv0, d0);
 
-	// Edge-preserving view-space normal reconstruction (pick closer neighbor on each axis)
-	vec2 uvL = frag_tex_coord - vec2(invSize.x, 0.0);
-	vec2 uvR = frag_tex_coord + vec2(invSize.x, 0.0);
-	vec2 uvU = frag_tex_coord - vec2(0.0, invSize.y);
-	vec2 uvD = frag_tex_coord + vec2(0.0, invSize.y);
+	// Edge-preserving view-space normal reconstruction using exact +/-1 integer texel steps
+	ivec2 icL = clamp(ic0 + ivec2(-1, 0), ivec2(0), texSize - ivec2(1));
+	ivec2 icR = clamp(ic0 + ivec2( 1, 0), ivec2(0), texSize - ivec2(1));
+	ivec2 icU = clamp(ic0 + ivec2( 0,-1), ivec2(0), texSize - ivec2(1));
+	ivec2 icD = clamp(ic0 + ivec2( 0, 1), ivec2(0), texSize - ivec2(1));
 
-	float dL = linearizeDepth(sampleRawDepth(uvL, texSize));
-	float dR = linearizeDepth(sampleRawDepth(uvR, texSize));
-	float dU = linearizeDepth(sampleRawDepth(uvU, texSize));
-	float dD = linearizeDepth(sampleRawDepth(uvD, texSize));
+	float dL = linearizeDepth(fetchRawDepth(icL, texSize));
+	float dR = linearizeDepth(fetchRawDepth(icR, texSize));
+	float dU = linearizeDepth(fetchRawDepth(icU, texSize));
+	float dD = linearizeDepth(fetchRawDepth(icD, texSize));
 
 	vec3 dPdx = (abs(dR - d0) < abs(dL - d0))
-		? (viewPosFromUV(uvR, dR) - p0)
-		: (p0 - viewPosFromUV(uvL, dL));
+		? (viewPosFromUV(uvFromTexel(icR, invSize), dR) - p0)
+		: (p0 - viewPosFromUV(uvFromTexel(icL, invSize), dL));
 	vec3 dPdy = (abs(dD - d0) < abs(dU - d0))
-		? (viewPosFromUV(uvD, dD) - p0)
-		: (p0 - viewPosFromUV(uvU, dU));
+		? (viewPosFromUV(uvFromTexel(icD, invSize), dD) - p0)
+		: (p0 - viewPosFromUV(uvFromTexel(icU, invSize), dU));
 
 	vec3 n = normalize(cross(dPdy, dPdx));
 	// Ensure normal faces the camera (-Z in our +Z-forward eye-depth convention)
@@ -100,7 +106,7 @@ void main() {
 
 	const int SAMPLES = 12;
 	const float GOLDEN_ANGLE = 2.39996323;
-	const float bias = 0.06 + d0 * 0.0015;
+	float bias = min(0.08 + d0 * 0.0006, 0.28);
 
 	float occ = 0.0;
 	for (int i = 0; i < SAMPLES; ++i) {
@@ -108,14 +114,17 @@ void main() {
 		float r = sqrt(fi);
 		float theta = float(i) * GOLDEN_ANGLE + baseAngle;
 		vec2 offset = vec2(cos(theta), sin(theta)) * (r * uvRadius);
-		vec2 suv = frag_tex_coord + offset;
+		ivec2 sic = clamp(ivec2(floor((uv0 + offset) * vec2(texSize))), ivec2(0), texSize - ivec2(1));
+		if (sic == ic0) {
+			continue;
+		}
 
-		float sz = sampleRawDepth(suv, texSize);
+		float sz = fetchRawDepth(sic, texSize);
 		if (sz <= 1e-5) {
 			continue;
 		}
 		float sd = linearizeDepth(sz);
-		vec3 sp = viewPosFromUV(suv, sd);
+		vec3 sp = viewPosFromUV(uvFromTexel(sic, invSize), sd);
 		vec3 v = sp - p0;
 		float dist2 = dot(v, v);
 		if (dist2 < 1e-4) {
