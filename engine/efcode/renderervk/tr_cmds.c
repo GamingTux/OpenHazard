@@ -454,6 +454,10 @@ void RE_EndFrame( int *frontEndMsec, int *backEndMsec ) {
 		|| r_vignette->modified
 		|| r_ohClassic->modified ) {
 
+		// Park the r_smp render thread before modifying Vulkan samplers, color tables,
+		// or destroying/recreating pipelines (prevents concurrent race on vk.pipelines[] / queue).
+		R_SyncRenderThread();
+
 		// texturemode stuff
 		if ( r_textureMode->modified ) {
 			GL_TextureMode( r_textureMode->string );

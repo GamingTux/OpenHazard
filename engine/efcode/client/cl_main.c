@@ -2130,6 +2130,10 @@ static void CL_OpenHazardSnapshotUserSettings( void ) {
 	oh_toggle_state.snapshotted = qtrue;
 }
 
+qboolean CL_IsOpenHazardPreviewActive( void ) {
+	return oh_toggle_state.snapshotted;
+}
+
 static void CL_OpenHazardRestoreLive( void ) {
 	int i;
 	if ( !oh_toggle_state.snapshotted ) {
@@ -2142,6 +2146,10 @@ static void CL_OpenHazardRestoreLive( void ) {
 	}
 	oh_toggle_state.snapshotted = qfalse;
 	oh_toggle_state.vanillaMode = qfalse;
+	{
+		extern void Com_WriteConfiguration( void );
+		Com_WriteConfiguration();
+	}
 }
 
 static void CL_OpenHazardApplyReload( void ) {
@@ -2175,6 +2183,7 @@ static void CL_OpenHazardToggle_f( void ) {
 		Cvar_Set( "r_ohClassic", "1" );
 		Cvar_Set( "r_hdTextures", "0" );
 		Cvar_Set( "r_fbo", "0" );
+		Cvar_Set( "r_directPost", "0" );
 		Cvar_Set( "r_gpuAutoTune", "0" );
 		Cvar_Set( "r_ext_multisample", "0" );
 		Cvar_Set( "r_ext_alpha_to_coverage", "0" );
@@ -2204,6 +2213,7 @@ static void CL_OpenHazardToggle_f( void ) {
 		Cvar_Set( "r_ohClassic", "0" );
 		Cvar_Set( "r_hdTextures", "1" );
 		Cvar_Set( "r_fbo", "1" );
+		Cvar_Set( "r_directPost", "0" );
 		Cvar_Set( "r_gpuAutoTune", "0" );
 		Cvar_Set( "r_ext_multisample", "4" );
 		Cvar_Set( "r_ext_alpha_to_coverage", "1" );

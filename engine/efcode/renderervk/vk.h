@@ -672,6 +672,7 @@ typedef struct {
 	qboolean clearAttachment;		// requires VK_IMAGE_USAGE_TRANSFER_DST_BIT for swapchains
 	qboolean fboActive;
 	qboolean directPostActive;		// on-chip subpass post-FX inside r_fbo 0 main render pass
+	int		direct_fx_mode;			// active zero-subpass direct_fx bitmask (bit0: tonemap, bit1: IGN dither)
 	qboolean blitEnabled;
 	qboolean msaaActive;
 	qboolean bloomActive;

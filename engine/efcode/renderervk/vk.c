@@ -238,6 +238,7 @@ const char *vk_format_string( VkFormat format )
 		CASE_STR( VK_FORMAT_B4G4R4A4_UNORM_PACK16 );
 		CASE_STR( VK_FORMAT_R4G4B4A4_UNORM_PACK16 );
 		CASE_STR( VK_FORMAT_R16G16B16A16_UNORM );
+		CASE_STR( VK_FORMAT_R16G16B16A16_SFLOAT );
 		CASE_STR( VK_FORMAT_A2B10G10R10_UNORM_PACK32 );
 		CASE_STR( VK_FORMAT_A2R10G10B10_UNORM_PACK32 );
 		CASE_STR( VK_FORMAT_B10G11R11_UFLOAT_PACK32 );
@@ -1811,7 +1812,7 @@ static qboolean vk_blit_enabled( VkPhysicalDevice physical_device, const VkForma
 }
 
 
-static VkFormat get_hdr_format( VkFormat base_format )
+static VkFormat get_hdr_format( VkPhysicalDevice physical_device, VkFormat base_format )
 {
 	if ( r_fbo->integer == 0 ) {
 		return base_format;
@@ -1819,7 +1820,22 @@ static VkFormat get_hdr_format( VkFormat base_format )
 
 	switch ( r_hdr->integer ) {
 		case -1: return VK_FORMAT_B4G4R4A4_UNORM_PACK16;
-		case 1: return VK_FORMAT_R16G16B16A16_UNORM;
+		case 1: {
+			// Prefer native FP16 (VK_FORMAT_R16G16B16A16_SFLOAT): mandatory Vulkan 1.0+ color/blend/filter
+			// format with true >1.0 HDR headroom before filmic tonemapping, and avoids Broadcom V3D 7.1
+			// (Mesa V3DV) R16G16B16A16_UNORM bugs (broken alphaToCoverage dropping floor grates + 4x slowdown).
+			const VkFormatFeatureFlags req =
+				VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT |
+				VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT |
+				VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
+				VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+			VkFormatProperties fp;
+			qvkGetPhysicalDeviceFormatProperties( physical_device, VK_FORMAT_R16G16B16A16_SFLOAT, &fp );
+			if ( ( fp.optimalTilingFeatures & req ) == req ) {
+				return VK_FORMAT_R16G16B16A16_SFLOAT;
+			}
+			return VK_FORMAT_R16G16B16A16_UNORM;
+		}
 		default: return base_format;
 	}
 }
@@ -1935,7 +1951,7 @@ static void setup_surface_formats( VkPhysicalDevice physical_device )
 {
 	vk.depth_format = get_depth_format( physical_device );
 
-	vk.color_format = get_hdr_format( vk.base_format.format );
+	vk.color_format = get_hdr_format( physical_device, vk.base_format.format );
 
 	vk.capture_format = VK_FORMAT_R8G8B8A8_UNORM;
 
@@ -3791,6 +3807,16 @@ static void vk_bloom_base_dims( uint32_t *w, uint32_t *h )
 
 static void vk_destroy_pipelines( qboolean resetCount );
 
+static int vk_compute_direct_fx_mode( void )
+{
+	int mode = 0;
+	if ( !vk.fboActive && !vk.directPostActive && !( r_ohClassic && r_ohClassic->integer ) ) {
+		if ( r_tonemap && r_tonemap->integer ) mode |= 1;
+		if ( r_dither && r_dither->integer ) mode |= 2;
+	}
+	return mode;
+}
+
 void vk_update_post_process_pipelines( void )
 {
 	if ( vk.fboActive ) {
@@ -3828,19 +3854,16 @@ void vk_update_post_process_pipelines( void )
 	if ( vk.directPostActive ) {
 		vk_create_post_process_pipeline( 7, gls.windowWidth, gls.windowHeight ); // direct on-chip subpass post-FX
 	}
-	if ( !vk.fboActive && !vk.directPostActive && vk.pipelines_count > 0 ) {
-		static int last_direct_fx = -1;
-		int cur_direct_fx = 0;
-		if ( !( r_ohClassic && r_ohClassic->integer ) ) {
-			if ( r_tonemap && r_tonemap->integer ) cur_direct_fx |= 1;
-			if ( r_dither && r_dither->integer ) cur_direct_fx |= 2;
-		}
-		if ( last_direct_fx != -1 && cur_direct_fx != last_direct_fx ) {
+	if ( !vk.fboActive && !vk.directPostActive ) {
+		int cur_direct_fx = vk_compute_direct_fx_mode();
+		if ( vk.pipelines_count > 0 && cur_direct_fx != vk.direct_fx_mode ) {
+			vk.direct_fx_mode = cur_direct_fx;
 			vk_wait_idle();
 			vk_destroy_pipelines( qfalse );
 			vk_prewarm_pipelines();
+		} else {
+			vk.direct_fx_mode = cur_direct_fx;
 		}
-		last_direct_fx = cur_direct_fx;
 	}
 }
 
@@ -4892,6 +4915,7 @@ void vk_initialize( void )
 
 	vk.fboActive = r_fbo->integer ? qtrue : qfalse;
 	vk.directPostActive = ( !vk.fboActive && r_directPost && r_directPost->integer ) ? qtrue : qfalse;
+	vk.direct_fx_mode = vk_compute_direct_fx_mode();
 	vk.msaaActive = r_ext_multisample->integer ? qtrue : qfalse;
 	vk.bloomActive = ( vk.fboActive && r_bloom->integer ) ? qtrue : qfalse;
 	vk.bloomDownscale = ( r_bloom_downscale->integer >= 2 ) ? (uint32_t)r_bloom_downscale->integer : 2u;
@@ -5642,6 +5666,10 @@ static void vk_destroy_pipelines( qboolean resetCounter )
 				vk.pipeline_create_count--;
 			}
 		}
+	}
+
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
+		vk.tess[i].last_pipeline = VK_NULL_HANDLE;
 	}
 
 	if ( resetCounter ) {
@@ -7285,7 +7313,8 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 	// depth fragment threshold
 	frag_spec_data[2].f = 0.85f;
 
-	if ( r_ext_alpha_to_coverage->integer && vkSamples != VK_SAMPLE_COUNT_1_BIT && frag_spec_data[0].i ) {
+	if ( r_ext_alpha_to_coverage->integer && vkSamples != VK_SAMPLE_COUNT_1_BIT && frag_spec_data[0].i
+		&& !( vk.fboActive && vk.color_format == VK_FORMAT_R16G16B16A16_UNORM ) ) {
 		frag_spec_data[3].i = 1;
 		alphaToCoverage = VK_TRUE;
 	}
@@ -9831,27 +9860,18 @@ qboolean vk_bloom( void )
 	vk_update_mvp( NULL );
 	vk.cmd->depth_range = DEPTH_RANGE_COUNT;
 
-	// invalidate pipeline state cache
-	//vk.cmd->last_pipeline = VK_NULL_HANDLE;
+	// Invalidate pipeline state cache: we just transitioned from RENDER_PASS_MAIN
+	// (potentially multisampled) into single-sample RENDER_PASS_POST_BLOOM, so any
+	// prior main-pass VkPipeline handle is incompatible and must not be rebound here.
+	vk.cmd->last_pipeline = VK_NULL_HANDLE;
 
-	if ( vk.cmd->last_pipeline != VK_NULL_HANDLE )
-	{
-		// restore last pipeline
-		qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.cmd->last_pipeline );
-
-		vk_update_mvp( NULL );
-
-		// force depth range and viewport/scissor updates
-		vk.cmd->depth_range = DEPTH_RANGE_COUNT;
-
-		// restore clobbered descriptor sets
-		for ( i = 0; i < ( ( vk.maxBoundDescriptorSets >= VK_DESC_COUNT ) ? VK_DESC_COUNT : VK_NUM_BLOOM_PASSES ); i++ ) {
-			if ( vk.cmd->descriptor_set.current[i] != VK_NULL_HANDLE ) {
-				if ( i == VK_DESC_UNIFORM /*|| i == VK_DESC_STORAGE*/ )
-					qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout, i, 1, &vk.cmd->descriptor_set.current[i], 1, &vk.cmd->descriptor_set.offset[i] );
-				else
-					qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout, i, 1, &vk.cmd->descriptor_set.current[i], 0, NULL );
-			}
+	// Restore clobbered descriptor sets so subsequent 2D draws find their bindings intact.
+	for ( i = 0; i < ( ( vk.maxBoundDescriptorSets >= VK_DESC_COUNT ) ? VK_DESC_COUNT : VK_NUM_BLOOM_PASSES ); i++ ) {
+		if ( vk.cmd->descriptor_set.current[i] != VK_NULL_HANDLE ) {
+			if ( i == VK_DESC_UNIFORM /*|| i == VK_DESC_STORAGE*/ )
+				qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout, i, 1, &vk.cmd->descriptor_set.current[i], 1, &vk.cmd->descriptor_set.offset[i] );
+			else
+				qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout, i, 1, &vk.cmd->descriptor_set.current[i], 0, NULL );
 		}
 	}
 

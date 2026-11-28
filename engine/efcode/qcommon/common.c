@@ -3152,6 +3152,16 @@ void Com_WriteConfiguration( void ) {
 		return;
 	}
 
+#ifndef DEDICATED
+	// Never overwrite the user's saved config with temporary F8 Classic/Maxi preview overrides.
+	{
+		extern qboolean CL_IsOpenHazardPreviewActive( void );
+		if ( CL_IsOpenHazardPreviewActive() ) {
+			return;
+		}
+	}
+#endif
+
 	if ( !(cvar_modifiedFlags & CVAR_ARCHIVE ) ) {
 		return;
 	}
